@@ -8,6 +8,7 @@ Integration test UIs for [SecureDApp CMS](https://github.com/securedapp-github/C
 |-----|---------|----------|
 | **Consent Demo** | `consent-demo/backend` — proxies public CMS API (`x-api-key` stays on server) | `consent-demo/frontend` |
 | **ERP Simulator** | `erp-sim/backend` — webhook receiver + optional CMS webhook registration | `erp-sim/frontend` |
+| **Redirect Consent** | — (static page; calls CMS with `x-api-key` from the browser) | `redirect-consent-demo.html` |
 
 ---
 
@@ -59,6 +60,23 @@ npm run dev
 ```
 
 Open the Vite URL (default `http://localhost:5174`). API proxy: `/api` → `http://localhost:4200`.
+
+---
+
+## Redirect Consent Demo
+
+Static page that creates a redirect consent request and opens the hosted OTP flow in a popup.
+
+1. **API** — start the CMS API (e.g. `http://localhost:3000`) with CORS allowing your demo origin.
+2. **Serve this file** on `http://localhost:5501` (must match API CORS), for example:
+
+```bash
+npx serve -l 5501
+```
+
+3. Open the served URL and open `redirect-consent-demo.html`.
+
+**In the page:** set API URL, `x-api-key`, `app_id`, purpose/policy (or use **Prefill**), email and phone → **Create Redirect URL + Open Popup** → **Send OTP** → verify → consent granted.
 
 ---
 
