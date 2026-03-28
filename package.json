@@ -1,0 +1,14 @@
+{
+  "name": "cms-test-app",
+  "private": true,
+  "description": "Unified SecureDApp CMS integration demo (see README.md)",
+  "scripts": {
+    "demo:install": "npm install --prefix demo-apps/unified-demo/backend && npm install --prefix demo-apps/unified-demo/frontend",
+    "demo:backend": "npm run dev --prefix demo-apps/unified-demo/backend",
+    "demo:frontend": "npm run dev --prefix demo-apps/unified-demo/frontend",
+    "demo:all": "concurrently -k -n api,ui -c green,cyan \"npm run demo:backend\" \"npm run demo:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

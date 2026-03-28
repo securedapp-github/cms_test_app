@@ -1,12 +1,11 @@
 {
-  "name": "erp-sim",
+  "name": "unified-cms-demo-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Single backend: consent proxy, redirect consent proxy, ERP webhooks",
+  "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js",
-    "frontend:dev": "npm --prefix frontend run dev"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
