@@ -62,9 +62,7 @@
       <button id="prefillBtn" type="button" class="secondary">Prefill policy/purpose</button>
       <button id="createBtn" type="button">Create Redirect URL + Open Popup</button>
     </div>
-    <p style="font-size: 0.85rem;">
-      If popup is blocked, allow popups for <code>http://localhost:5501</code>.
-    </p>
+    <p style="font-size: 0.85rem;" id="popupHint"></p>
   </div>
 
   <div class="card">
@@ -73,6 +71,13 @@
   </div>
 
   <script>
+    (function () {
+      var hint = document.getElementById('popupHint');
+      if (hint) {
+        hint.innerHTML = 'If popup is blocked, allow popups for <code>' + location.origin + '</code>.';
+      }
+    })();
+
     const resultEl = document.getElementById('result');
     const apiUrlEl = document.getElementById('apiUrl');
     const apiKeyEl = document.getElementById('apiKey');
