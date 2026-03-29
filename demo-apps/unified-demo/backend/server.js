@@ -5,12 +5,12 @@ const cors = require('cors');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 const PORT = parseInt(process.env.PORT || '5050', 10);
-const CMS_BASE_URL = (process.env.CMS_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
-const CMS_PUBLIC_API_KEY = process.env.CMS_PUBLIC_API_KEY || '';
-const CMS_APP_ID = process.env.CMS_APP_ID || '';
-const CMS_ADMIN_BEARER_TOKEN = process.env.CMS_ADMIN_BEARER_TOKEN || '';
-const ERP_WEBHOOK_PUBLIC_URL =
-  process.env.ERP_WEBHOOK_PUBLIC_URL || `http://localhost:${PORT}/webhooks/securedapp`;
+/** Optional env fallbacks for local dev; production can omit and use headers from the UI only */
+const ENV_CMS_BASE_URL = (process.env.CMS_BASE_URL || '').replace(/\/+$/, '');
+const ENV_CMS_PUBLIC_API_KEY = process.env.CMS_PUBLIC_API_KEY || '';
+const ENV_CMS_APP_ID = process.env.CMS_APP_ID || '';
+const ENV_CMS_ADMIN_BEARER_TOKEN = process.env.CMS_ADMIN_BEARER_TOKEN || '';
+/** Incoming webhook HMAC — only CMS → this server; cannot be set per-browser */
 const ERP_WEBHOOK_SECRET = process.env.ERP_WEBHOOK_SECRET || '';
 const DEFAULT_WEBHOOK_EVENTS = [
   'consent.granted',
@@ -23,29 +23,56 @@ const DEFAULT_WEBHOOK_EVENTS = [
 const webhookEvents = [];
 const MAX_WEBHOOK_EVENTS = 200;
 
-function requirePublicApiConfig(options = {}) {
-  const needsAppId = Boolean(options.needsAppId);
-  if (!CMS_PUBLIC_API_KEY) {
-    const err = new Error('CMS_PUBLIC_API_KEY is not set');
-    err.statusCode = 500;
-    throw err;
+function normalizeBaseUrl(raw) {
+  const s = String(raw || '').trim().replace(/\/+$/, '');
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '') || ''}`;
+  } catch {
+    return '';
   }
-  if (needsAppId && !CMS_APP_ID) {
-    const err = new Error('CMS_APP_ID is not set');
-    err.statusCode = 500;
+}
+
+/**
+ * Per-request CMS target + credentials from headers (production demo) or .env (dev fallback).
+ * Headers: x-cms-base-url, x-api-key, x-app-id, x-demo-admin-bearer (optional)
+ */
+function getCmsContext(req) {
+  const h = req.headers || {};
+  const base =
+    normalizeBaseUrl(h['x-cms-base-url'] || h['x-demo-cms-base-url']) || ENV_CMS_BASE_URL;
+  const key = String(h['x-api-key'] || '').trim() || ENV_CMS_PUBLIC_API_KEY;
+  const appId = String(h['x-app-id'] || h['x-demo-app-id'] || '').trim() || ENV_CMS_APP_ID;
+  const adminBearer =
+    String(h['x-demo-admin-bearer'] || '').trim().replace(/^Bearer\s+/i, '') ||
+    ENV_CMS_ADMIN_BEARER_TOKEN;
+  return { base, key, appId, adminBearer };
+}
+
+function requireClientConfig(ctx, options = {}) {
+  const needsAppId = Boolean(options.needsAppId);
+  const missing = [];
+  if (!ctx.base) missing.push('x-cms-base-url (or CMS_BASE_URL in .env)');
+  if (!ctx.key) missing.push('x-api-key (or CMS_PUBLIC_API_KEY in .env)');
+  if (needsAppId && !ctx.appId) missing.push('x-app-id (or CMS_APP_ID in .env)');
+  if (missing.length) {
+    const err = new Error(`Missing CMS connection: ${missing.join(', ')}`);
+    err.statusCode = 400;
     throw err;
   }
 }
 
-async function cmsFetch(path, options = {}) {
-  requirePublicApiConfig({ needsAppId: Boolean(options.needsAppId) });
-  const url = `${CMS_BASE_URL}${path}`;
+async function cmsFetch(ctx, path, options = {}) {
+  requireClientConfig(ctx, { needsAppId: Boolean(options.needsAppId) });
+  const url = `${ctx.base}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      'x-api-key': CMS_PUBLIC_API_KEY,
+      'x-api-key': ctx.key,
       ...(options.headers || {}),
     },
   });
@@ -63,6 +90,14 @@ async function cmsFetch(path, options = {}) {
     throw err;
   }
   return json;
+}
+
+function publicDemoApiBase(req) {
+  const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
+  if (explicit) return explicit;
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  const host = (req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`).split(',')[0].trim();
+  return `${proto}://${host}`;
 }
 
 function parseSignatureHeader(header) {
@@ -97,18 +132,19 @@ function verifySignatureIfConfigured(rawBody, signatureHeader, timestampHeader) 
   return { ok, reason: ok ? 'verified' : 'mismatch' };
 }
 
-async function cmsRegisterWebhook(url, secret, events) {
-  if (!CMS_ADMIN_BEARER_TOKEN) {
-    const err = new Error('CMS_ADMIN_BEARER_TOKEN is not set');
-    err.statusCode = 500;
+async function cmsRegisterWebhook(ctx, url, secret, events) {
+  if (!ctx.adminBearer) {
+    const err = new Error('Missing admin token: set x-demo-admin-bearer header or CMS_ADMIN_BEARER_TOKEN in .env');
+    err.statusCode = 400;
     throw err;
   }
-  const res = await fetch(`${CMS_BASE_URL}/webhooks`, {
+  requireClientConfig(ctx, { needsAppId: false });
+  const res = await fetch(`${ctx.base}/webhooks`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      authorization: `Bearer ${CMS_ADMIN_BEARER_TOKEN}`,
+      authorization: `Bearer ${ctx.adminBearer}`,
     },
     body: JSON.stringify({ url, secret, events }),
   });
@@ -136,17 +172,21 @@ app.use(
 
 /* --- Consent (public API proxy) --- */
 app.get('/api/config', (req, res) => {
+  const ctx = getCmsContext(req);
+  const webhookBase = publicDemoApiBase(req);
   res.json({
-    cms_base_url: CMS_BASE_URL,
-    app_id: CMS_APP_ID,
-    has_api_key: Boolean(CMS_PUBLIC_API_KEY),
-    webhook_url: ERP_WEBHOOK_PUBLIC_URL,
+    cms_base_url: ctx.base || null,
+    app_id: ctx.appId || null,
+    has_api_key: Boolean(ctx.key),
+    has_admin_bearer: Boolean(ctx.adminBearer),
+    webhook_url: `${webhookBase}/webhooks/securedapp`,
+    source: ctx.base && ctx.key ? 'headers_or_env' : 'unset',
   });
 });
 
 app.get('/api/purposes', async (req, res, next) => {
   try {
-    const data = await cmsFetch('/public/purposes');
+    const data = await cmsFetch(getCmsContext(req), '/public/purposes');
     res.json(data);
   } catch (e) {
     next(e);
@@ -155,7 +195,8 @@ app.get('/api/purposes', async (req, res, next) => {
 
 app.get('/api/policy', async (req, res, next) => {
   try {
-    const data = await cmsFetch(`/public/apps/${CMS_APP_ID}/policy`, { needsAppId: true });
+    const ctx = getCmsContext(req);
+    const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/policy`, { needsAppId: true });
     res.json(data);
   } catch (e) {
     next(e);
@@ -164,8 +205,9 @@ app.get('/api/policy', async (req, res, next) => {
 
 app.post('/api/consent/grant', async (req, res, next) => {
   try {
+    const ctx = getCmsContext(req);
     const { email, phone_number, purpose_id, policy_version_id } = req.body || {};
-    const data = await cmsFetch(`/public/apps/${CMS_APP_ID}/consent`, {
+    const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
       method: 'POST',
       body: JSON.stringify({ email, phone_number, purpose_id, policy_version_id }),
@@ -178,8 +220,9 @@ app.post('/api/consent/grant', async (req, res, next) => {
 
 app.post('/api/consent/withdraw', async (req, res, next) => {
   try {
+    const ctx = getCmsContext(req);
     const { email, phone_number, purpose_id } = req.body || {};
-    const data = await cmsFetch(`/public/apps/${CMS_APP_ID}/consent`, {
+    const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
       method: 'DELETE',
       body: JSON.stringify({ email, phone_number, purpose_id }),
@@ -190,12 +233,13 @@ app.post('/api/consent/withdraw', async (req, res, next) => {
   }
 });
 
-/* --- Redirect consent (API key on server) --- */
+/* --- Redirect consent --- */
 app.get('/api/redirect/prefill', async (req, res, next) => {
   try {
+    const ctx = getCmsContext(req);
     const [purposesRes, policyRes] = await Promise.all([
-      cmsFetch('/public/purposes'),
-      cmsFetch(`/public/apps/${CMS_APP_ID}/policy`, { needsAppId: true }),
+      cmsFetch(ctx, '/public/purposes'),
+      cmsFetch(ctx, `/public/apps/${ctx.appId}/policy`, { needsAppId: true }),
     ]);
     res.json({ purposes: purposesRes.purposes || [], policy: policyRes });
   } catch (e) {
@@ -205,8 +249,9 @@ app.get('/api/redirect/prefill', async (req, res, next) => {
 
 app.post('/api/redirect/request', async (req, res, next) => {
   try {
+    const ctx = getCmsContext(req);
     const { email, phone_number, purpose_id, policy_version_id } = req.body || {};
-    const data = await cmsFetch(`/public/apps/${CMS_APP_ID}/consent/redirect/request`, {
+    const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent/redirect/request`, {
       needsAppId: true,
       method: 'POST',
       body: JSON.stringify({
@@ -238,13 +283,16 @@ app.post('/api/events/clear', (req, res) => {
 
 app.post('/api/webhooks/register', async (req, res, next) => {
   try {
-    const url = req.body?.url || ERP_WEBHOOK_PUBLIC_URL;
-    const secret = req.body?.secret || ERP_WEBHOOK_SECRET || undefined;
+    const ctx = getCmsContext(req);
+    const webhookBase = publicDemoApiBase(req);
+    const defaultUrl = `${webhookBase}/webhooks/securedapp`;
+    const url = req.body?.url || defaultUrl;
+    const secret = req.body?.secret || undefined;
     const ev =
       Array.isArray(req.body?.events) && req.body.events.length > 0
         ? req.body.events
         : DEFAULT_WEBHOOK_EVENTS;
-    const data = await cmsRegisterWebhook(url, secret, ev);
+    const data = await cmsRegisterWebhook(ctx, url, secret, ev);
     res.status(201).json(data);
   } catch (e) {
     next(e);
@@ -289,5 +337,5 @@ app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Unified CMS demo API: http://localhost:${PORT}`);
   // eslint-disable-next-line no-console
-  console.log(`Webhook receiver: ${ERP_WEBHOOK_PUBLIC_URL}`);
+  console.log('CMS connection: send x-cms-base-url, x-api-key, x-app-id from the UI (or set CMS_* in .env for dev).');
 });
