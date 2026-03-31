@@ -86,15 +86,24 @@ async function cmsFetch(ctx, path, options = {}) {
 function publicDemoApiBase(req) {
   const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
-  if (process.env.NODE_ENV === 'production') return DEFAULT_PUBLIC_DEMO_APP_URL;
-  const origin = String(req.get('origin') || '').trim();
-  if (origin) {
-    const normalized = normalizeBaseUrl(origin);
-    if (normalized) return normalized;
+  const candidates = [
+    req.get('origin'),
+    req.get('referer'),
+    req.get('x-forwarded-host') ? `${req.get('x-forwarded-proto') || 'https'}://${req.get('x-forwarded-host')}` : null,
+    req.get('host') ? `${req.protocol || 'http'}://${req.get('host')}` : null,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = normalizeBaseUrl(candidate);
+    if (!normalized) continue;
+    // Prefer hosted demo URL whenever request context is securedapp domain.
+    if (normalized.includes('securedapp.io')) return DEFAULT_PUBLIC_DEMO_APP_URL;
+    if (!normalized.includes('localhost') && !normalized.includes('127.0.0.1')) return normalized;
   }
-  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
-  const host = (req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`).split(',')[0].trim();
-  return `${proto}://${host}`;
+
+  // If proxy headers are missing in hosted env, avoid leaking localhost URL to users.
+  if (process.env.NODE_ENV === 'production') return DEFAULT_PUBLIC_DEMO_APP_URL;
+  return `http://localhost:${PORT}`;
 }
 
 function parseSignatureHeader(header) {
