@@ -195,6 +195,21 @@ app.post('/api/consent/withdraw', async (req, res, next) => {
   }
 });
 
+app.post('/api/consent/state', async (req, res, next) => {
+  try {
+    const ctx = getCmsContext(req);
+    const { email, phone_number } = req.body || {};
+    const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent/state`, {
+      needsAppId: true,
+      method: 'POST',
+      body: JSON.stringify({ email, phone_number }),
+    });
+    res.json(data);
+  } catch (e) {
+    next(e);
+  }
+});
+
 /* --- Redirect consent --- */
 app.get('/api/redirect/prefill', async (req, res, next) => {
   try {

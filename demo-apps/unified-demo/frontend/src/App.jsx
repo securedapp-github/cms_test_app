@@ -235,6 +235,30 @@ function ConsentSection() {
     }
   }
 
+  async function onFetchState() {
+    setError(null)
+    setResult(null)
+    setLoading(true)
+    try {
+      const data = await api(
+        '/api/consent/state',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email,
+            phone_number: phoneNumber,
+          }),
+        },
+        conn
+      )
+      setResult(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function togglePurpose(purposeId) {
     setSelectedPurposeIds((prev) =>
       prev.includes(purposeId) ? prev.filter((id) => id !== purposeId) : [...prev, purposeId]
@@ -308,6 +332,9 @@ function ConsentSection() {
           </div>
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <button type="button" disabled={loading} onClick={onFetchState} style={{ ...btn, background: '#334155' }}>
+            {loading ? '…' : 'Fetch user consents'}
+          </button>
           <button
             type="button"
             disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId}
