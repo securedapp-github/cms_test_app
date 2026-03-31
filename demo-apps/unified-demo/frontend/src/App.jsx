@@ -58,13 +58,82 @@ function headersFromConn(conn) {
 
 async function api(path, options, conn) {
   const base = headersFromConn(conn)
-  const res = await fetch(path, {
-    ...options,
-    headers: { ...base, ...(options?.headers || {}) },
-  })
-  const data = await res.json().catch(() => null)
-  if (!res.ok) throw new Error((data && data.error) || `Request failed: ${res.status}`)
-  return data
+  try {
+    const res = await fetch(path, {
+      ...options,
+      headers: { ...base, ...(options?.headers || {}) },
+    })
+    const data = await res.json().catch(() => null)
+    if (res.ok) return data
+
+    // If demo proxy is unavailable in deployment, fallback to direct CMS public APIs.
+    if ([502, 503, 504].includes(res.status)) {
+      const fallback = await cmsFallback(path, options, conn)
+      if (fallback !== null) return fallback
+    }
+    throw new Error((data && data.error) || `Request failed: ${res.status}`)
+  } catch (err) {
+    // Network-level failure on demo proxy: try direct CMS fallback.
+    const fallback = await cmsFallback(path, options, conn)
+    if (fallback !== null) return fallback
+    throw err
+  }
+}
+
+async function cmsFallback(path, options, conn) {
+  const baseUrl = String(conn?.cmsBaseUrl || '').trim().replace(/\/+$/, '')
+  const appId = String(conn?.appId || '').trim()
+  const apiKey = String(conn?.apiKey || '').trim()
+  if (!baseUrl || !apiKey) return null
+
+  async function directFetch(urlPath, method = 'GET', bodyObj = null, needsApp = false) {
+    if (needsApp && !appId) throw new Error('App ID is required')
+    const url = `${baseUrl}${urlPath}`
+    const res = await fetch(url, {
+      method,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error((data && data.error) || `CMS request failed: ${res.status}`)
+    return data
+  }
+
+  const body = (() => {
+    try {
+      return options?.body ? JSON.parse(options.body) : {}
+    } catch {
+      return {}
+    }
+  })()
+
+  switch (path) {
+    case '/api/purposes':
+      return directFetch('/public/purposes')
+    case '/api/policy':
+      return directFetch(`/public/apps/${appId}/policy`, 'GET', null, true)
+    case '/api/consent/grant':
+      return directFetch(`/public/apps/${appId}/consent`, 'POST', body, true)
+    case '/api/consent/withdraw':
+      return directFetch(`/public/apps/${appId}/consent`, 'DELETE', body, true)
+    case '/api/consent/state':
+      return directFetch(`/public/apps/${appId}/consent/state`, 'POST', body, true)
+    case '/api/redirect/request':
+      return directFetch(`/public/apps/${appId}/consent/redirect/request`, 'POST', body, true)
+    case '/api/redirect/prefill': {
+      const [purposes, policy] = await Promise.all([
+        directFetch('/public/purposes'),
+        directFetch(`/public/apps/${appId}/policy`, 'GET', null, true),
+      ])
+      return { purposes: purposes.purposes || [], policy }
+    }
+    default:
+      return null
+  }
 }
 
 function TabButton({ active, children, onClick }) {
