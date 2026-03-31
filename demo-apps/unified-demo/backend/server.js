@@ -84,6 +84,11 @@ async function cmsFetch(ctx, path, options = {}) {
 function publicDemoApiBase(req) {
   const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
+  const origin = String(req.get('origin') || '').trim();
+  if (origin) {
+    const normalized = normalizeBaseUrl(origin);
+    if (normalized) return normalized;
+  }
   const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
   const host = (req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`).split(',')[0].trim();
   return `${proto}://${host}`;

@@ -152,7 +152,6 @@ function ConnectionPanel() {
 
 function ConsentSection() {
   const { conn, connVersion } = useContext(DemoConnContext)
-  const [config, setConfig] = useState(null)
   const [purposes, setPurposes] = useState([])
   const [policy, setPolicy] = useState(null)
   const [email, setEmail] = useState('user@example.com')
@@ -166,14 +165,11 @@ function ConsentSection() {
 
   useEffect(() => {
     setError(null)
-    setConfig(null)
     setPurposes([])
     setPolicy(null)
     setSelectedPurposeIds([])
     ;(async () => {
       try {
-        const cfg = await api('/api/config', {}, conn)
-        setConfig(cfg)
         const p = await api('/api/purposes', {}, conn)
         setPurposes(p.purposes || [])
         const pol = await api('/api/policy', {}, conn)
@@ -272,20 +268,13 @@ function ConsentSection() {
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
-        Uses the connection above. The demo server adds your <code>x-api-key</code> when calling the CMS (browser → demo → CMS).
+        Choose one or more purposes and submit consent. The latest active policy is used automatically.
       </p>
-      <div style={grid2}>
-        <div style={card}>
-          <h3 style={{ marginTop: 0 }}>Resolved config</h3>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(config, null, 2)}</pre>
-        </div>
-        <div style={card}>
-          <h3 style={{ marginTop: 0 }}>Active policy</h3>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(policy, null, 2)}</pre>
-        </div>
-      </div>
       <div style={card}>
         <h3 style={{ marginTop: 0 }}>Grant / withdraw</h3>
+        <p style={{ marginTop: 0, color: '#475569' }}>
+          Active policy: <strong>{policy?.policyVersion?.version || 'Not available'}</strong>
+        </p>
         <div style={grid2}>
           <label>
             Email
@@ -348,13 +337,8 @@ function ConsentSection() {
           </button>
         </div>
         {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
-        {result ? (
-          <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(result, null, 2)}</pre>
-        ) : null}
-      </div>
-      <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Purposes</h3>
-        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(purposes, null, 2)}</pre>
+        {result?.error ? <p style={{ color: '#b91c1c', marginTop: 12 }}>{result.error}</p> : null}
+        {result && !result.error ? <p style={{ color: '#166534', marginTop: 12 }}>Request completed successfully.</p> : null}
       </div>
     </div>
   )
@@ -364,6 +348,7 @@ function ErpSection() {
   const { conn, connVersion } = useContext(DemoConnContext)
   const [events, setEvents] = useState([])
   const [error, setError] = useState(null)
+  const [webhookUrl, setWebhookUrl] = useState('')
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -376,6 +361,14 @@ function ErpSection() {
   }, [conn])
 
   useEffect(() => {
+    ;(async () => {
+      try {
+        const cfg = await api('/api/config', {}, conn)
+        setWebhookUrl(cfg.webhook_url || '')
+      } catch (_) {
+        setWebhookUrl('')
+      }
+    })()
     refresh()
     const t = setInterval(refresh, 2000)
     return () => clearInterval(t)
@@ -397,9 +390,15 @@ function ErpSection() {
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
-        This tab shows webhook calls received by the demo endpoint. Configure webhook delivery in CMS to point at the
-        webhook URL shown under <strong>Resolved config</strong> on the Consent tab.
+        This tab shows webhook calls received by this demo.
       </p>
+      <div style={card}>
+        <h3 style={{ marginTop: 0 }}>Webhook endpoint</h3>
+        <p style={{ color: '#475569', marginTop: 0 }}>Use this URL while creating webhook in CMS:</p>
+        <div style={{ fontFamily: 'monospace', fontSize: 13, background: '#f8fafc', border: '1px solid #e2e8f0', padding: 10, borderRadius: 8 }}>
+          {webhookUrl || 'Save connection first'}
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" onClick={refresh} disabled={busy} style={btnSec}>
           Refresh
@@ -447,24 +446,20 @@ function RedirectSection() {
     setResult(null)
     setPurposes([])
     setSelectedPurposeIds([])
-  }, [connVersion])
-
-  async function onPrefill() {
-    setBusy(true)
-    setResult(null)
-    try {
-      const data = await api('/api/redirect/prefill', {}, conn)
-      const fetchedPurposes = data.purposes || []
-      setPurposes(fetchedPurposes)
-      setSelectedPurposeIds([])
-      if (data.policy?.policyVersion?.id) setPolicyVersionId(data.policy.policyVersion.id)
-      setResult({ message: 'Prefill OK', purposes: fetchedPurposes.length })
-    } catch (e) {
-      setResult({ error: e.message })
-    } finally {
-      setBusy(false)
-    }
-  }
+    ;(async () => {
+      setBusy(true)
+      try {
+        const data = await api('/api/redirect/prefill', {}, conn)
+        const fetchedPurposes = data.purposes || []
+        setPurposes(fetchedPurposes)
+        if (data.policy?.policyVersion?.id) setPolicyVersionId(data.policy.policyVersion.id)
+      } catch (e) {
+        setResult({ error: e.message })
+      } finally {
+        setBusy(false)
+      }
+    })()
+  }, [connVersion, conn])
 
   async function onCreate() {
     setBusy(true)
@@ -513,8 +508,7 @@ function RedirectSection() {
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
-        OTP page opens on the CMS host; your CMS must allow CORS from <code>{typeof window !== 'undefined' ? window.location.origin : ''}</code>.
-        Allow popups for this site.
+        We use the latest active policy automatically. Select purpose(s), enter user details, and open the OTP consent popup.
       </p>
       <div style={card}>
         <div style={grid2}>
@@ -553,15 +547,9 @@ function RedirectSection() {
               })}
             </div>
           </div>
-          <label>
-            policy_version_id
-            <input
-              value={policyVersionId}
-              onChange={(e) => setPolicyVersionId(e.target.value)}
-              style={input}
-              placeholder="UUID"
-            />
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', color: '#475569', fontSize: 14 }}>
+            Active policy: <strong style={{ marginLeft: 6 }}>{policyVersionId ? 'Auto-selected' : 'Not available'}</strong>
+          </div>
           <label>
             email
             <input value={email} onChange={(e) => setEmail(e.target.value)} style={input} type="email" />
@@ -572,9 +560,6 @@ function RedirectSection() {
           </label>
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" style={btnSec} disabled={busy} onClick={onPrefill}>
-            Prefill from CMS
-          </button>
           <button
             type="button"
             style={btn}
@@ -586,10 +571,10 @@ function RedirectSection() {
         </div>
       </div>
       <div style={card}>
-        <strong>Last response</strong>
-        <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-          {result ? JSON.stringify(result, null, 2) : '—'}
-        </pre>
+        <strong>Status</strong>
+        <p style={{ marginTop: 8, color: result?.error ? '#b91c1c' : '#166534' }}>
+          {result ? (result.error || 'Redirect request created successfully.') : '—'}
+        </p>
       </div>
     </div>
   )
