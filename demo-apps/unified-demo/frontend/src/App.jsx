@@ -157,7 +157,7 @@ function ConsentSection() {
   const [policy, setPolicy] = useState(null)
   const [email, setEmail] = useState('user@example.com')
   const [phoneNumber, setPhoneNumber] = useState('9876543210')
-  const [selectedPurposeId, setSelectedPurposeId] = useState('')
+  const [selectedPurposeIds, setSelectedPurposeIds] = useState([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -169,6 +169,7 @@ function ConsentSection() {
     setConfig(null)
     setPurposes([])
     setPolicy(null)
+    setSelectedPurposeIds([])
     ;(async () => {
       try {
         const cfg = await api('/api/config', {}, conn)
@@ -195,7 +196,7 @@ function ConsentSection() {
           body: JSON.stringify({
             email,
             phone_number: phoneNumber,
-            purpose_id: selectedPurposeId,
+            purpose_ids: selectedPurposeIds,
             policy_version_id: policyVersionId,
           }),
         },
@@ -221,7 +222,7 @@ function ConsentSection() {
           body: JSON.stringify({
             email,
             phone_number: phoneNumber,
-            purpose_id: selectedPurposeId,
+            purpose_ids: selectedPurposeIds,
           }),
         },
         conn
@@ -232,6 +233,16 @@ function ConsentSection() {
     } finally {
       setLoading(false)
     }
+  }
+
+  function togglePurpose(purposeId) {
+    setSelectedPurposeIds((prev) =>
+      prev.includes(purposeId) ? prev.filter((id) => id !== purposeId) : [...prev, purposeId]
+    )
+  }
+
+  function toggleAllPurposes() {
+    setSelectedPurposeIds((prev) => (prev.length === purposes.length ? [] : purposes.map((p) => p.id)))
   }
 
   return (
@@ -260,27 +271,52 @@ function ConsentSection() {
             Phone
             <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} style={input} />
           </label>
-          <label style={{ gridColumn: '1 / -1' }}>
-            Purpose
-            <select
-              value={selectedPurposeId}
-              onChange={(e) => setSelectedPurposeId(e.target.value)}
-              style={input}
-            >
-              <option value="">Select…</option>
-              {purposes.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Purposes</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={purposes.length > 0 && selectedPurposeIds.length === purposes.length}
+                onChange={toggleAllPurposes}
+              />
+              <span>Select all purposes</span>
+            </label>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {purposes.map((p) => {
+                const checked = selectedPurposeIds.includes(p.id)
+                const dataPoints = Array.isArray(p.required_data) ? p.required_data : []
+                return (
+                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+                      <input type="checkbox" checked={checked} onChange={() => togglePurpose(p.id)} />
+                      <span>{p.name}</span>
+                    </label>
+                    {dataPoints.length > 0 ? (
+                      <div style={{ marginTop: 8, paddingLeft: 24, display: 'grid', gap: 4 }}>
+                        {dataPoints.map((dp) => (
+                          <label key={`${p.id}-${dp}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <input type="checkbox" checked={checked} readOnly />
+                            <span style={{ color: '#475569' }}>{dp}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-          <button type="button" disabled={loading || !selectedPurposeId || !policyVersionId} onClick={onGrant} style={btn}>
+          <button
+            type="button"
+            disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId}
+            onClick={onGrant}
+            style={btn}
+          >
             {loading ? '…' : 'Grant consent'}
           </button>
-          <button type="button" disabled={loading || !selectedPurposeId} onClick={onWithdraw} style={btnSec}>
+          <button type="button" disabled={loading || selectedPurposeIds.length === 0} onClick={onWithdraw} style={btnSec}>
             {loading ? '…' : 'Withdraw'}
           </button>
         </div>
@@ -372,7 +408,8 @@ function ErpSection() {
 
 function RedirectSection() {
   const { conn, connVersion } = useContext(DemoConnContext)
-  const [purposeId, setPurposeId] = useState('')
+  const [purposes, setPurposes] = useState([])
+  const [selectedPurposeIds, setSelectedPurposeIds] = useState([])
   const [policyVersionId, setPolicyVersionId] = useState('')
   const [email, setEmail] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -381,6 +418,8 @@ function RedirectSection() {
 
   useEffect(() => {
     setResult(null)
+    setPurposes([])
+    setSelectedPurposeIds([])
   }, [connVersion])
 
   async function onPrefill() {
@@ -388,10 +427,11 @@ function RedirectSection() {
     setResult(null)
     try {
       const data = await api('/api/redirect/prefill', {}, conn)
-      const purposes = data.purposes || []
-      if (purposes.length > 0) setPurposeId(purposes[0].id)
+      const fetchedPurposes = data.purposes || []
+      setPurposes(fetchedPurposes)
+      setSelectedPurposeIds([])
       if (data.policy?.policyVersion?.id) setPolicyVersionId(data.policy.policyVersion.id)
-      setResult({ message: 'Prefill OK', purposes: purposes.length })
+      setResult({ message: 'Prefill OK', purposes: fetchedPurposes.length })
     } catch (e) {
       setResult({ error: e.message })
     } finally {
@@ -410,7 +450,7 @@ function RedirectSection() {
           body: JSON.stringify({
             email: email.trim(),
             phone_number: phoneNumber.trim(),
-            purpose_id: purposeId.trim(),
+            purpose_ids: selectedPurposeIds,
             policy_version_id: policyVersionId.trim(),
           }),
         },
@@ -433,6 +473,16 @@ function RedirectSection() {
     }
   }
 
+  function togglePurpose(purposeId) {
+    setSelectedPurposeIds((prev) =>
+      prev.includes(purposeId) ? prev.filter((id) => id !== purposeId) : [...prev, purposeId]
+    )
+  }
+
+  function toggleAllPurposes() {
+    setSelectedPurposeIds((prev) => (prev.length === purposes.length ? [] : purposes.map((p) => p.id)))
+  }
+
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
@@ -441,10 +491,41 @@ function RedirectSection() {
       </p>
       <div style={card}>
         <div style={grid2}>
-          <label>
-            purpose_id
-            <input value={purposeId} onChange={(e) => setPurposeId(e.target.value)} style={input} placeholder="UUID" />
-          </label>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Purposes</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={purposes.length > 0 && selectedPurposeIds.length === purposes.length}
+                onChange={toggleAllPurposes}
+              />
+              <span>Select all purposes</span>
+            </label>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {purposes.map((p) => {
+                const checked = selectedPurposeIds.includes(p.id)
+                const dataPoints = Array.isArray(p.required_data) ? p.required_data : []
+                return (
+                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+                      <input type="checkbox" checked={checked} onChange={() => togglePurpose(p.id)} />
+                      <span>{p.name}</span>
+                    </label>
+                    {dataPoints.length > 0 ? (
+                      <div style={{ marginTop: 8, paddingLeft: 24, display: 'grid', gap: 4 }}>
+                        {dataPoints.map((dp) => (
+                          <label key={`${p.id}-${dp}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <input type="checkbox" checked={checked} readOnly />
+                            <span style={{ color: '#475569' }}>{dp}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
           <label>
             policy_version_id
             <input
@@ -467,7 +548,12 @@ function RedirectSection() {
           <button type="button" style={btnSec} disabled={busy} onClick={onPrefill}>
             Prefill from CMS
           </button>
-          <button type="button" style={btn} disabled={busy} onClick={onCreate}>
+          <button
+            type="button"
+            style={btn}
+            disabled={busy || selectedPurposeIds.length === 0 || !policyVersionId.trim()}
+            onClick={onCreate}
+          >
             Create redirect + open popup
           </button>
         </div>

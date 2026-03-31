@@ -168,11 +168,11 @@ app.get('/api/policy', async (req, res, next) => {
 app.post('/api/consent/grant', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
-    const { email, phone_number, purpose_id, policy_version_id } = req.body || {};
+    const { email, phone_number, purpose_id, purpose_ids, policy_version_id } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
       method: 'POST',
-      body: JSON.stringify({ email, phone_number, purpose_id, policy_version_id }),
+      body: JSON.stringify({ email, phone_number, purpose_id, purpose_ids, policy_version_id }),
     });
     res.status(201).json(data);
   } catch (e) {
@@ -183,11 +183,11 @@ app.post('/api/consent/grant', async (req, res, next) => {
 app.post('/api/consent/withdraw', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
-    const { email, phone_number, purpose_id } = req.body || {};
+    const { email, phone_number, purpose_id, purpose_ids } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
       method: 'DELETE',
-      body: JSON.stringify({ email, phone_number, purpose_id }),
+      body: JSON.stringify({ email, phone_number, purpose_id, purpose_ids }),
     });
     res.json(data);
   } catch (e) {
@@ -212,7 +212,7 @@ app.get('/api/redirect/prefill', async (req, res, next) => {
 app.post('/api/redirect/request', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
-    const { email, phone_number, purpose_id, policy_version_id } = req.body || {};
+    const { email, phone_number, purpose_id, purpose_ids, policy_version_id } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent/redirect/request`, {
       needsAppId: true,
       method: 'POST',
@@ -220,6 +220,7 @@ app.post('/api/redirect/request', async (req, res, next) => {
         email,
         phone_number,
         purpose_id,
+        purpose_ids,
         policy_version_id,
       }),
     });
