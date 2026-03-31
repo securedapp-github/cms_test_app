@@ -439,9 +439,26 @@ function ErpSection() {
       }
     })()
     refresh()
-    const t = setInterval(refresh, 2000)
+    const t = setInterval(refresh, 5000)
     return () => clearInterval(t)
   }, [connVersion, refresh])
+
+  useEffect(() => {
+    const stream = new EventSource('/api/events/stream')
+    stream.addEventListener('webhook', (ev) => {
+      try {
+        const item = JSON.parse(ev.data)
+        setEvents((prev) => {
+          const next = [item, ...prev.filter((e) => e.id !== item.id)]
+          return next.slice(0, 200)
+        })
+      } catch (_) {}
+    })
+    stream.onerror = () => {
+      // Keep quiet; polling fallback continues.
+    }
+    return () => stream.close()
+  }, [])
 
   async function onClear() {
     setBusy(true)
@@ -459,7 +476,7 @@ function ErpSection() {
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
-        This tab shows webhook calls received by this demo.
+        This tab shows webhook calls received by this demo in real time.
       </p>
       <div style={card}>
         <h3 style={{ marginTop: 0 }}>Webhook endpoint</h3>

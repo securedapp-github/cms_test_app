@@ -9,11 +9,13 @@ const PORT = parseInt(process.env.PORT || '5050', 10);
 const ENV_CMS_BASE_URL = (process.env.CMS_BASE_URL || '').replace(/\/+$/, '');
 const ENV_CMS_PUBLIC_API_KEY = process.env.CMS_PUBLIC_API_KEY || '';
 const ENV_CMS_APP_ID = process.env.CMS_APP_ID || '';
+const DEFAULT_PUBLIC_DEMO_APP_URL = 'https://cms-test.securedapp.io';
 /** Incoming webhook HMAC — only CMS → this server; cannot be set per-browser */
 const ERP_WEBHOOK_SECRET = process.env.ERP_WEBHOOK_SECRET || '';
 
 const webhookEvents = [];
 const MAX_WEBHOOK_EVENTS = 200;
+const sseClients = new Set();
 
 function normalizeBaseUrl(raw) {
   const s = String(raw || '').trim().replace(/\/+$/, '');
@@ -84,6 +86,7 @@ async function cmsFetch(ctx, path, options = {}) {
 function publicDemoApiBase(req) {
   const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
+  if (process.env.NODE_ENV === 'production') return DEFAULT_PUBLIC_DEMO_APP_URL;
   const origin = String(req.get('origin') || '').trim();
   if (origin) {
     const normalized = normalizeBaseUrl(origin);
@@ -259,6 +262,21 @@ app.get('/api/events', (req, res) => {
   res.json({ events: webhookEvents });
 });
 
+app.get('/api/events/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const client = { res };
+  sseClients.add(client);
+  res.write(`event: connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+
+  req.on('close', () => {
+    sseClients.delete(client);
+  });
+});
+
 app.post('/api/events/clear', (req, res) => {
   webhookEvents.splice(0, webhookEvents.length);
   res.json({ cleared: true });
@@ -287,6 +305,14 @@ app.post('/webhooks/securedapp', (req, res) => {
   };
   webhookEvents.unshift(record);
   if (webhookEvents.length > MAX_WEBHOOK_EVENTS) webhookEvents.length = MAX_WEBHOOK_EVENTS;
+  const payload = `event: webhook\ndata: ${JSON.stringify(record)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.res.write(payload);
+    } catch (_) {
+      sseClients.delete(client);
+    }
+  }
   res.status(200).json({ ok: true });
 });
 
