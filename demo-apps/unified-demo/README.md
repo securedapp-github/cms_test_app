@@ -3,7 +3,7 @@
 Combines:
 
 - **Consent (embedded)** — grant/withdraw via CMS public API (credentials from the UI or optional `.env` fallbacks)
-- **Webhooks (ERP)** — receive CMS webhooks + optional register-from-UI (needs admin JWT in UI or env)
+- **Webhooks (ERP)** — receive CMS webhook calls and inspect payloads/signatures
 - **Redirect consent** — redirect URL + OTP popup
 
 ## Production-style deploy
@@ -13,7 +13,6 @@ Deploy the Node API and static UI **once**. Operators open the UI and fill **CMS
 - CMS base URL → `x-cms-base-url`
 - Tenant public API key → `x-api-key`
 - App UUID → `x-app-id`
-- Optional admin JWT → `x-demo-admin-bearer` (webhook registration)
 
 The demo API forwards those headers to your CMS on each request. **Do not treat the browser as secret storage** — the API key is visible in DevTools; this pattern is for demos and internal tools.
 

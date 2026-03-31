@@ -26,7 +26,6 @@ const defaultConn = {
   cmsBaseUrl: '',
   apiKey: '',
   appId: '',
-  adminBearer: '',
 }
 
 const DemoConnContext = createContext(null)
@@ -40,7 +39,6 @@ function loadConn() {
       cmsBaseUrl: typeof p.cmsBaseUrl === 'string' ? p.cmsBaseUrl : '',
       apiKey: typeof p.apiKey === 'string' ? p.apiKey : '',
       appId: typeof p.appId === 'string' ? p.appId : '',
-      adminBearer: typeof p.adminBearer === 'string' ? p.adminBearer : '',
     }
   } catch {
     return { ...defaultConn }
@@ -52,11 +50,9 @@ function headersFromConn(conn) {
   const u = conn.cmsBaseUrl.trim()
   const k = conn.apiKey.trim()
   const a = conn.appId.trim()
-  const b = conn.adminBearer.trim().replace(/^Bearer\s+/i, '')
   if (u) h['x-cms-base-url'] = u
   if (k) h['x-api-key'] = k
   if (a) h['x-app-id'] = a
-  if (b) h['x-demo-admin-bearer'] = b
   return h
 }
 
@@ -139,17 +135,6 @@ function ConnectionPanel() {
             onChange={(e) => update('appId', e.target.value)}
             style={input}
             placeholder="Required for app-scoped calls"
-            autoComplete="off"
-          />
-        </label>
-        <label style={{ gridColumn: '1 / -1' }}>
-          Admin JWT (optional — webhook registration only)
-          <input
-            value={draft.adminBearer}
-            onChange={(e) => update('adminBearer', e.target.value)}
-            style={input}
-            type="password"
-            placeholder="Bearer token from CMS login"
             autoComplete="off"
           />
         </label>
@@ -316,8 +301,6 @@ function ErpSection() {
   const { conn, connVersion } = useContext(DemoConnContext)
   const [events, setEvents] = useState([])
   const [error, setError] = useState(null)
-  const [registerUrl, setRegisterUrl] = useState('')
-  const [registerSecret, setRegisterSecret] = useState('')
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -348,26 +331,11 @@ function ErpSection() {
     }
   }
 
-  async function onRegister() {
-    setBusy(true)
-    setError(null)
-    try {
-      const body = {}
-      if (registerUrl.trim()) body.url = registerUrl.trim()
-      if (registerSecret.trim()) body.secret = registerSecret.trim()
-      await api('/api/webhooks/register', { method: 'POST', body: JSON.stringify(body) }, conn)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <div>
       <p style={{ color: '#64748b', marginTop: 0 }}>
-        Webhook URL is shown under <strong>Resolved config</strong> on the Consent tab (from this demo API&apos;s public URL).
-        Register that URL in CMS. Optional: set <strong>Admin JWT</strong> in connection settings to use Register below.
+        This tab shows webhook calls received by the demo endpoint. Configure webhook delivery in CMS to point at the
+        webhook URL shown under <strong>Resolved config</strong> on the Consent tab.
       </p>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" onClick={refresh} disabled={busy} style={btnSec}>
@@ -377,22 +345,6 @@ function ErpSection() {
           Clear
         </button>
         <span style={{ color: '#64748b' }}>Events: {events.length}</span>
-      </div>
-      <div style={{ ...card, marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Register webhook in CMS</h3>
-        <div style={grid2}>
-          <label>
-            URL (optional override)
-            <input value={registerUrl} onChange={(e) => setRegisterUrl(e.target.value)} style={input} />
-          </label>
-          <label>
-            Secret (optional)
-            <input value={registerSecret} onChange={(e) => setRegisterSecret(e.target.value)} style={input} />
-          </label>
-        </div>
-        <button type="button" style={{ ...btn, marginTop: 12 }} onClick={onRegister} disabled={busy}>
-          Register in CMS
-        </button>
       </div>
       {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
       <div style={{ marginTop: 16 }}>
@@ -540,7 +492,6 @@ export default function App() {
       cmsBaseUrl: next.cmsBaseUrl || '',
       apiKey: next.apiKey || '',
       appId: next.appId || '',
-      adminBearer: next.adminBearer || '',
     }
     localStorage.setItem(LS_KEY, JSON.stringify(merged))
     setConn(merged)

@@ -9,16 +9,8 @@ const PORT = parseInt(process.env.PORT || '5050', 10);
 const ENV_CMS_BASE_URL = (process.env.CMS_BASE_URL || '').replace(/\/+$/, '');
 const ENV_CMS_PUBLIC_API_KEY = process.env.CMS_PUBLIC_API_KEY || '';
 const ENV_CMS_APP_ID = process.env.CMS_APP_ID || '';
-const ENV_CMS_ADMIN_BEARER_TOKEN = process.env.CMS_ADMIN_BEARER_TOKEN || '';
 /** Incoming webhook HMAC — only CMS → this server; cannot be set per-browser */
 const ERP_WEBHOOK_SECRET = process.env.ERP_WEBHOOK_SECRET || '';
-const DEFAULT_WEBHOOK_EVENTS = [
-  'consent.granted',
-  'consent.withdrawn',
-  'policy.updated',
-  'purpose.created',
-  'dsr.completed',
-];
 
 const webhookEvents = [];
 const MAX_WEBHOOK_EVENTS = 200;
@@ -37,7 +29,7 @@ function normalizeBaseUrl(raw) {
 
 /**
  * Per-request CMS target + credentials from headers (production demo) or .env (dev fallback).
- * Headers: x-cms-base-url, x-api-key, x-app-id, x-demo-admin-bearer (optional)
+ * Headers: x-cms-base-url, x-api-key, x-app-id
  */
 function getCmsContext(req) {
   const h = req.headers || {};
@@ -45,10 +37,7 @@ function getCmsContext(req) {
     normalizeBaseUrl(h['x-cms-base-url'] || h['x-demo-cms-base-url']) || ENV_CMS_BASE_URL;
   const key = String(h['x-api-key'] || '').trim() || ENV_CMS_PUBLIC_API_KEY;
   const appId = String(h['x-app-id'] || h['x-demo-app-id'] || '').trim() || ENV_CMS_APP_ID;
-  const adminBearer =
-    String(h['x-demo-admin-bearer'] || '').trim().replace(/^Bearer\s+/i, '') ||
-    ENV_CMS_ADMIN_BEARER_TOKEN;
-  return { base, key, appId, adminBearer };
+  return { base, key, appId };
 }
 
 function requireClientConfig(ctx, options = {}) {
@@ -132,32 +121,6 @@ function verifySignatureIfConfigured(rawBody, signatureHeader, timestampHeader) 
   return { ok, reason: ok ? 'verified' : 'mismatch' };
 }
 
-async function cmsRegisterWebhook(ctx, url, secret, events) {
-  if (!ctx.adminBearer) {
-    const err = new Error('Missing admin token: set x-demo-admin-bearer header or CMS_ADMIN_BEARER_TOKEN in .env');
-    err.statusCode = 400;
-    throw err;
-  }
-  requireClientConfig(ctx, { needsAppId: false });
-  const res = await fetch(`${ctx.base}/webhooks`, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      authorization: `Bearer ${ctx.adminBearer}`,
-    },
-    body: JSON.stringify({ url, secret, events }),
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const err = new Error((data && data.error) || `CMS error ${res.status}`);
-    err.statusCode = res.status;
-    err.details = data;
-    throw err;
-  }
-  return data;
-}
-
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 
@@ -178,7 +141,6 @@ app.get('/api/config', (req, res) => {
     cms_base_url: ctx.base || null,
     app_id: ctx.appId || null,
     has_api_key: Boolean(ctx.key),
-    has_admin_bearer: Boolean(ctx.adminBearer),
     webhook_url: `${webhookBase}/webhooks/securedapp`,
     source: ctx.base && ctx.key ? 'headers_or_env' : 'unset',
   });
@@ -279,24 +241,6 @@ app.get('/api/events', (req, res) => {
 app.post('/api/events/clear', (req, res) => {
   webhookEvents.splice(0, webhookEvents.length);
   res.json({ cleared: true });
-});
-
-app.post('/api/webhooks/register', async (req, res, next) => {
-  try {
-    const ctx = getCmsContext(req);
-    const webhookBase = publicDemoApiBase(req);
-    const defaultUrl = `${webhookBase}/webhooks/securedapp`;
-    const url = req.body?.url || defaultUrl;
-    const secret = req.body?.secret || undefined;
-    const ev =
-      Array.isArray(req.body?.events) && req.body.events.length > 0
-        ? req.body.events
-        : DEFAULT_WEBHOOK_EVENTS;
-    const data = await cmsRegisterWebhook(ctx, url, secret, ev);
-    res.status(201).json(data);
-  } catch (e) {
-    next(e);
-  }
 });
 
 app.post('/webhooks/securedapp', (req, res) => {
