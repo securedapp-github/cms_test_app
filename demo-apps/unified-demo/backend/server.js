@@ -268,6 +268,10 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
 
+app.get('/health', (req, res) => {
+  res.json({ ok: true, now: new Date().toISOString() });
+});
+
 app.get('/api/events', (req, res) => {
   res.json({ events: webhookEvents });
 });
