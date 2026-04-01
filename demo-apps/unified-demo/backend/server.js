@@ -158,7 +158,8 @@ app.get('/api/config', (req, res) => {
     cms_base_url: ctx.base || null,
     app_id: ctx.appId || null,
     has_api_key: Boolean(ctx.key),
-    webhook_url: `${webhookBase}/webhooks/securedapp`,
+    // Prefer /api path since hosted reverse proxies commonly route /api/* to backend.
+    webhook_url: `${webhookBase}/api/webhooks/securedapp`,
     source: ctx.base && ctx.key ? 'headers_or_env' : 'unset',
   });
 });
@@ -291,7 +292,7 @@ app.post('/api/events/clear', (req, res) => {
   res.json({ cleared: true });
 });
 
-app.post('/webhooks/securedapp', (req, res) => {
+function handleWebhookReceive(req, res) {
   const sig = req.header('x-webhook-signature');
   const ts = req.header('x-webhook-timestamp');
   const verification = verifySignatureIfConfigured(
@@ -323,7 +324,11 @@ app.post('/webhooks/securedapp', (req, res) => {
     }
   }
   res.status(200).json({ ok: true });
-});
+}
+
+// Support both direct and /api-prefixed webhook paths for hosted proxy compatibility.
+app.post('/webhooks/securedapp', handleWebhookReceive);
+app.post('/api/webhooks/securedapp', handleWebhookReceive);
 
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;
