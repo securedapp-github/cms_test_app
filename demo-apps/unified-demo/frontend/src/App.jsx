@@ -2,25 +2,48 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 const LS_KEY = 'securedapp-unified-demo-connection-v1'
 
-const card = {
-  padding: 16,
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
-  background: '#fff',
-  marginBottom: 16,
+const pageWrap = {
+  maxWidth: 1080,
+  margin: '0 auto',
+  padding: '28px 20px 40px',
+  fontFamily:
+    "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif",
+  color: '#0f172a',
 }
-const input = { width: '100%', padding: 8, marginTop: 4, borderRadius: 8, border: '1px solid #cbd5e1' }
+const card = {
+  padding: 18,
+  border: '1px solid #dbe3ef',
+  borderRadius: 12,
+  background: '#ffffff',
+  marginBottom: 16,
+  boxShadow: '0 1px 2px rgba(2, 6, 23, 0.05)',
+}
+const input = {
+  width: '100%',
+  padding: '10px 12px',
+  marginTop: 6,
+  borderRadius: 10,
+  border: '1px solid #cbd5e1',
+  fontSize: 14,
+  outline: 'none',
+  boxSizing: 'border-box',
+}
 const btn = {
   padding: '10px 16px',
-  borderRadius: 8,
+  borderRadius: 10,
   border: 'none',
   cursor: 'pointer',
   fontWeight: 600,
   background: '#4f46e5',
   color: '#fff',
+  minHeight: 40,
+  boxShadow: '0 1px 2px rgba(79, 70, 229, 0.25)',
 }
 const btnSec = { ...btn, background: '#0f766e' }
-const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }
+const btnMuted = { ...btn, background: '#334155', boxShadow: '0 1px 2px rgba(51, 65, 85, 0.25)' }
+const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }
+const muted = { color: '#64748b' }
+const sectionTitle = { marginTop: 0, marginBottom: 10, fontSize: 18, fontWeight: 700 }
 
 const defaultConn = {
   cmsBaseUrl: '',
@@ -169,13 +192,13 @@ function ConnectionPanel() {
   }
 
   return (
-    <div style={{ ...card, background: '#f8fafc', borderColor: '#94a3b8' }}>
-      <h2 style={{ marginTop: 0, fontSize: 18 }}>CMS connection</h2>
-      <p style={{ marginTop: 0, color: '#64748b', fontSize: 14 }}>
+    <div style={{ ...card, background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)', borderColor: '#cbd5e1' }}>
+      <h2 style={{ ...sectionTitle, marginBottom: 6 }}>CMS connection</h2>
+      <p style={{ marginTop: 0, ...muted, fontSize: 14, lineHeight: 1.5 }}>
         Enter your CMS details here once — saved in <strong>this browser only</strong> (localStorage). No redeploy needed.
         The demo API forwards <code>x-api-key</code> to your CMS; treat this like a dev tool, not a vault.
       </p>
-      <p style={{ marginTop: -6, color: '#475569', fontSize: 13 }}>
+      <p style={{ marginTop: -4, color: '#475569', fontSize: 13 }}>
         Recommended test backend: <strong>https://cms-test-be.securedapp.io</strong>. Production backend
         <strong> https://cmsbe.securedapp.io</strong> is also supported.
       </p>
@@ -212,11 +235,7 @@ function ConnectionPanel() {
           />
         </label>
       </div>
-      <button
-        type="button"
-        style={{ ...btn, marginTop: 12 }}
-        onClick={() => saveConn(draft)}
-      >
+      <button type="button" style={{ ...btn, marginTop: 14 }} onClick={() => saveConn(draft)}>
         Save connection
       </button>
     </div>
@@ -235,6 +254,8 @@ function ConsentSection() {
   const [error, setError] = useState(null)
 
   const policyVersionId = useMemo(() => policy?.policyVersion?.id || null, [policy])
+  const consentFlow = useMemo(() => policy?.policyVersion?.consent_flow || 'embedded', [policy])
+  const embeddedAllowed = consentFlow === 'embedded'
 
   useEffect(() => {
     setError(null)
@@ -340,11 +361,16 @@ function ConsentSection() {
 
   return (
     <div>
-      <p style={{ color: '#64748b', marginTop: 0 }}>
+      <p style={{ ...muted, marginTop: 0 }}>
         Choose one or more purposes and submit consent. The latest active policy is used automatically.
       </p>
+      {!embeddedAllowed ? (
+        <p style={{ color: '#b45309', marginTop: 0 }}>
+          This tenant is configured for <strong>redirect</strong> consent flow. Embedded grant/withdraw is blocked.
+        </p>
+      ) : null}
       <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Grant / withdraw</h3>
+        <h3 style={sectionTitle}>Grant / withdraw</h3>
         <p style={{ marginTop: 0, color: '#475569' }}>
           Active policy: <strong>{policy?.policyVersion?.version || 'Not available'}</strong>
         </p>
@@ -372,7 +398,7 @@ function ConsentSection() {
                 const checked = selectedPurposeIds.includes(p.id)
                 const dataPoints = Array.isArray(p.required_data) ? p.required_data : []
                 return (
-                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, background: '#fcfdff' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
                       <input type="checkbox" checked={checked} onChange={() => togglePurpose(p.id)} />
                       <span>{p.name}</span>
@@ -393,23 +419,28 @@ function ConsentSection() {
             </div>
           </div>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-          <button type="button" disabled={loading} onClick={onFetchState} style={{ ...btn, background: '#334155' }}>
+        <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" disabled={loading} onClick={onFetchState} style={btnMuted}>
             {loading ? '…' : 'Fetch user consents'}
           </button>
           <button
             type="button"
-            disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId}
+            disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId || !embeddedAllowed}
             onClick={onGrant}
             style={btn}
           >
             {loading ? '…' : 'Grant consent'}
           </button>
-          <button type="button" disabled={loading || selectedPurposeIds.length === 0} onClick={onWithdraw} style={btnSec}>
+          <button
+            type="button"
+            disabled={loading || selectedPurposeIds.length === 0 || !embeddedAllowed}
+            onClick={onWithdraw}
+            style={btnSec}
+          >
             {loading ? '…' : 'Withdraw'}
           </button>
         </div>
-        {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+        {error ? <p style={{ color: '#b91c1c', marginTop: 12 }}>{error}</p> : null}
         {result?.error ? <p style={{ color: '#b91c1c', marginTop: 12 }}>{result.error}</p> : null}
         {result && !result.error ? <p style={{ color: '#166534', marginTop: 12 }}>Request completed successfully.</p> : null}
       </div>
@@ -479,13 +510,13 @@ function ErpSection() {
 
   return (
     <div>
-      <p style={{ color: '#64748b', marginTop: 0 }}>
+      <p style={{ ...muted, marginTop: 0 }}>
         This tab shows webhook calls received by this demo in real time.
       </p>
       <div style={card}>
-        <h3 style={{ marginTop: 0 }}>Webhook endpoint</h3>
+        <h3 style={sectionTitle}>Webhook endpoint</h3>
         <p style={{ color: '#475569', marginTop: 0 }}>Use this URL while creating webhook in CMS:</p>
-        <div style={{ fontFamily: 'monospace', fontSize: 13, background: '#f8fafc', border: '1px solid #e2e8f0', padding: 10, borderRadius: 8 }}>
+        <div style={{ fontFamily: 'monospace', fontSize: 13, background: '#f8fafc', border: '1px solid #e2e8f0', padding: 12, borderRadius: 10 }}>
           {webhookUrl || 'Save connection first'}
         </div>
       </div>
@@ -501,7 +532,7 @@ function ErpSection() {
       {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
       <div style={{ marginTop: 16 }}>
         {events.map((e) => (
-          <div key={e.id} style={{ ...card, marginBottom: 10 }}>
+          <div key={e.id} style={{ ...card, marginBottom: 10, background: '#fbfdff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
                 <strong>{e.headers?.['x-webhook-event'] || 'event'}</strong>
@@ -514,7 +545,9 @@ function ErpSection() {
                 </div>
               </div>
             </div>
-            <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(e.body, null, 2)}</pre>
+            <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 10 }}>
+              {JSON.stringify(e.body, null, 2)}
+            </pre>
           </div>
         ))}
       </div>
@@ -531,6 +564,7 @@ function RedirectSection() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [consentFlow, setConsentFlow] = useState('embedded')
 
   useEffect(() => {
     setResult(null)
@@ -543,6 +577,7 @@ function RedirectSection() {
         const fetchedPurposes = data.purposes || []
         setPurposes(fetchedPurposes)
         if (data.policy?.policyVersion?.id) setPolicyVersionId(data.policy.policyVersion.id)
+        setConsentFlow(data.policy?.policyVersion?.consent_flow || 'embedded')
       } catch (e) {
         setResult({ error: e.message })
       } finally {
@@ -597,9 +632,14 @@ function RedirectSection() {
 
   return (
     <div>
-      <p style={{ color: '#64748b', marginTop: 0 }}>
+      <p style={{ ...muted, marginTop: 0 }}>
         We use the latest active policy automatically. Select purpose(s), enter user details, and open the OTP consent popup.
       </p>
+      {consentFlow !== 'redirect' ? (
+        <p style={{ color: '#b45309', marginTop: 0 }}>
+          This tenant is configured for <strong>embedded</strong> consent flow. Redirect request is blocked.
+        </p>
+      ) : null}
       <div style={card}>
         <div style={grid2}>
           <div style={{ gridColumn: '1 / -1' }}>
@@ -617,7 +657,7 @@ function RedirectSection() {
                 const checked = selectedPurposeIds.includes(p.id)
                 const dataPoints = Array.isArray(p.required_data) ? p.required_data : []
                 return (
-                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                  <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, background: '#fcfdff' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
                       <input type="checkbox" checked={checked} onChange={() => togglePurpose(p.id)} />
                       <span>{p.name}</span>
@@ -649,11 +689,11 @@ function RedirectSection() {
             <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} style={input} />
           </label>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button
             type="button"
             style={btn}
-            disabled={busy || selectedPurposeIds.length === 0 || !policyVersionId.trim()}
+            disabled={busy || selectedPurposeIds.length === 0 || !policyVersionId.trim() || consentFlow !== 'redirect'}
             onClick={onCreate}
           >
             Create redirect + open popup
@@ -661,7 +701,7 @@ function RedirectSection() {
         </div>
       </div>
       <div style={card}>
-        <strong>Status</strong>
+        <strong style={{ fontSize: 15 }}>Status</strong>
         <p style={{ marginTop: 8, color: result?.error ? '#b91c1c' : '#166534' }}>
           {result ? (result.error || 'Redirect request created successfully.') : '—'}
         </p>
@@ -693,14 +733,14 @@ export default function App() {
 
   return (
     <DemoConnContext.Provider value={ctx}>
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: 24 }}>
-        <h1 style={{ margin: '0 0 8px', fontSize: 26 }}>Unified CMS demo</h1>
-        <p style={{ margin: '0 0 20px', color: '#64748b' }}>
+      <div style={pageWrap}>
+        <h1 style={{ margin: '0 0 8px', fontSize: 30, letterSpacing: '-0.01em' }}>Unified CMS demo</h1>
+        <p style={{ margin: '0 0 20px', ...muted, lineHeight: 1.5 }}>
           Production-friendly: configure CMS URL, API key, and app ID in the browser — no server env churn. Deploy the
           static UI + small API once.
         </p>
         <ConnectionPanel />
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
           <TabButton active={tab === 'consent'} onClick={() => setTab('consent')}>
             Consent (embedded)
           </TabButton>

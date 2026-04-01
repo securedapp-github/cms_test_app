@@ -83,6 +83,11 @@ async function cmsFetch(ctx, path, options = {}) {
   return json;
 }
 
+async function getTenantConsentFlow(ctx) {
+  const policy = await cmsFetch(ctx, `/public/apps/${ctx.appId}/policy`, { needsAppId: true });
+  return String(policy?.policyVersion?.consent_flow || 'embedded').toLowerCase();
+}
+
 function publicDemoApiBase(req) {
   const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
@@ -186,6 +191,12 @@ app.get('/api/policy', async (req, res, next) => {
 app.post('/api/consent/grant', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
+    const flow = await getTenantConsentFlow(ctx);
+    if (flow !== 'embedded') {
+      const err = new Error('This tenant uses redirect consent flow. Embedded consent is disabled.');
+      err.statusCode = 409;
+      throw err;
+    }
     const { email, phone_number, purpose_id, purpose_ids, policy_version_id } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
@@ -201,6 +212,12 @@ app.post('/api/consent/grant', async (req, res, next) => {
 app.post('/api/consent/withdraw', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
+    const flow = await getTenantConsentFlow(ctx);
+    if (flow !== 'embedded') {
+      const err = new Error('This tenant uses redirect consent flow. Embedded consent is disabled.');
+      err.statusCode = 409;
+      throw err;
+    }
     const { email, phone_number, purpose_id, purpose_ids } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent`, {
       needsAppId: true,
@@ -245,6 +262,12 @@ app.get('/api/redirect/prefill', async (req, res, next) => {
 app.post('/api/redirect/request', async (req, res, next) => {
   try {
     const ctx = getCmsContext(req);
+    const flow = await getTenantConsentFlow(ctx);
+    if (flow !== 'redirect') {
+      const err = new Error('This tenant uses embedded consent flow. Redirect consent is disabled.');
+      err.statusCode = 409;
+      throw err;
+    }
     const { email, phone_number, purpose_id, purpose_ids, policy_version_id } = req.body || {};
     const data = await cmsFetch(ctx, `/public/apps/${ctx.appId}/consent/redirect/request`, {
       needsAppId: true,
