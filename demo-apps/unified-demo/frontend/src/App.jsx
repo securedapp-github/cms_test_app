@@ -175,6 +175,10 @@ function ConnectionPanel() {
         Enter your CMS details here once — saved in <strong>this browser only</strong> (localStorage). No redeploy needed.
         The demo API forwards <code>x-api-key</code> to your CMS; treat this like a dev tool, not a vault.
       </p>
+      <p style={{ marginTop: -6, color: '#475569', fontSize: 13 }}>
+        Recommended test backend: <strong>https://cms-test-be.securedapp.io</strong>. Production backend
+        <strong> https://cmsbe.securedapp.io</strong> is also supported.
+      </p>
       <div style={grid2}>
         <label style={{ gridColumn: '1 / -1' }}>
           CMS base URL
@@ -182,7 +186,7 @@ function ConnectionPanel() {
             value={draft.cmsBaseUrl}
             onChange={(e) => update('cmsBaseUrl', e.target.value)}
             style={input}
-            placeholder="https://cmsbe.securedapp.io"
+            placeholder="https://cms-test-be.securedapp.io"
             autoComplete="off"
           />
         </label>
