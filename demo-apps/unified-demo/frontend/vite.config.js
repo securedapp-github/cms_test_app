@@ -6,8 +6,12 @@ export default defineConfig({
   server: {
     port: 5175,
     strictPort: true,
+    allowedHosts: ['cms-test.securedapp.io', 'localhost'],
     proxy: {
       '/api': 'http://localhost:5050',
     },
+  },
+  preview: {
+    allowedHosts: ['cms-test.securedapp.io', 'localhost'],
   },
 })
