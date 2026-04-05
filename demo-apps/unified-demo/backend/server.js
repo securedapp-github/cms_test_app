@@ -1,5 +1,4 @@
 require('dotenv').config();
-const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
@@ -9,13 +8,6 @@ const PORT = parseInt(process.env.PORT || '5050', 10);
 const ENV_CMS_BASE_URL = (process.env.CMS_BASE_URL || '').replace(/\/+$/, '');
 const ENV_CMS_PUBLIC_API_KEY = process.env.CMS_PUBLIC_API_KEY || '';
 const ENV_CMS_APP_ID = process.env.CMS_APP_ID || '';
-const DEFAULT_PUBLIC_DEMO_APP_URL = 'https://cms-test.securedapp.io';
-/** Incoming webhook HMAC — only CMS → this server; cannot be set per-browser */
-const ERP_WEBHOOK_SECRET = process.env.ERP_WEBHOOK_SECRET || '';
-
-const webhookEvents = [];
-const MAX_WEBHOOK_EVENTS = 200;
-const sseClients = new Set();
 
 function normalizeBaseUrl(raw) {
   const s = String(raw || '').trim().replace(/\/+$/, '');
@@ -88,83 +80,18 @@ async function getTenantConsentFlow(ctx) {
   return String(policy?.policyVersion?.consent_flow || 'embedded').toLowerCase();
 }
 
-function publicDemoApiBase(req) {
-  const explicit = (process.env.PUBLIC_DEMO_API_URL || '').trim().replace(/\/+$/, '');
-  if (explicit) return explicit;
-  const candidates = [
-    req.get('origin'),
-    req.get('referer'),
-    req.get('x-forwarded-host') ? `${req.get('x-forwarded-proto') || 'https'}://${req.get('x-forwarded-host')}` : null,
-    req.get('host') ? `${req.protocol || 'http'}://${req.get('host')}` : null,
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const normalized = normalizeBaseUrl(candidate);
-    if (!normalized) continue;
-    // Prefer hosted demo URL whenever request context is securedapp domain.
-    if (normalized.includes('securedapp.io')) return DEFAULT_PUBLIC_DEMO_APP_URL;
-    if (!normalized.includes('localhost') && !normalized.includes('127.0.0.1')) return normalized;
-  }
-
-  // If proxy headers are missing in hosted env, avoid leaking localhost URL to users.
-  if (process.env.NODE_ENV === 'production') return DEFAULT_PUBLIC_DEMO_APP_URL;
-  return `http://localhost:${PORT}`;
-}
-
-function parseSignatureHeader(header) {
-  const out = { t: null, v1: null };
-  if (!header) return out;
-  const parts = String(header)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const p of parts) {
-    const [k, v] = p.split('=');
-    if (!k || v == null) continue;
-    if (k === 't') out.t = v;
-    if (k === 'v1') out.v1 = v;
-  }
-  return out;
-}
-
-function verifySignatureIfConfigured(rawBody, signatureHeader, timestampHeader) {
-  if (!ERP_WEBHOOK_SECRET) return { ok: true, reason: 'no-secret-configured' };
-  if (!signatureHeader) return { ok: false, reason: 'missing-signature' };
-  const parsed = parseSignatureHeader(signatureHeader);
-  const ts = parsed.t || (timestampHeader ? String(timestampHeader).trim() : null);
-  if (!ts) return { ok: false, reason: 'missing-timestamp' };
-  if (!parsed.v1) return { ok: false, reason: 'missing-v1' };
-  const msg = `${ts}.${rawBody}`;
-  const expected = crypto.createHmac('sha256', ERP_WEBHOOK_SECRET).update(msg, 'utf8').digest('hex');
-  const provided = String(parsed.v1).trim();
-  const ok =
-    expected.length === provided.length &&
-    crypto.timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(provided, 'utf8'));
-  return { ok, reason: ok ? 'verified' : 'mismatch' };
-}
-
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 
-app.use(
-  express.json({
-    limit: '2mb',
-    verify: (req, res, buf) => {
-      req.rawBody = buf.toString('utf8');
-    },
-  })
-);
+app.use(express.json({ limit: '2mb' }));
 
 /* --- Consent (public API proxy) --- */
 app.get('/api/config', (req, res) => {
   const ctx = getCmsContext(req);
-  const webhookBase = publicDemoApiBase(req);
   res.json({
     cms_base_url: ctx.base || null,
     app_id: ctx.appId || null,
     has_api_key: Boolean(ctx.key),
-    // Prefer /api path since hosted reverse proxies commonly route /api/* to backend.
-    webhook_url: `${webhookBase}/api/webhooks/securedapp`,
     source: ctx.base && ctx.key ? 'headers_or_env' : 'unset',
   });
 });
@@ -286,7 +213,6 @@ app.post('/api/redirect/request', async (req, res, next) => {
   }
 });
 
-/* --- ERP / webhooks --- */
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
@@ -294,68 +220,6 @@ app.get('/api/health', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
-
-app.get('/api/events', (req, res) => {
-  res.json({ events: webhookEvents });
-});
-
-app.get('/api/events/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders?.();
-
-  const client = { res };
-  sseClients.add(client);
-  res.write(`event: connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
-
-  req.on('close', () => {
-    sseClients.delete(client);
-  });
-});
-
-app.post('/api/events/clear', (req, res) => {
-  webhookEvents.splice(0, webhookEvents.length);
-  res.json({ cleared: true });
-});
-
-function handleWebhookReceive(req, res) {
-  const sig = req.header('x-webhook-signature');
-  const ts = req.header('x-webhook-timestamp');
-  const verification = verifySignatureIfConfigured(
-    req.rawBody || JSON.stringify(req.body || {}),
-    sig,
-    ts
-  );
-  const record = {
-    id: crypto.randomUUID
-      ? crypto.randomUUID()
-      : String(Date.now()) + Math.random().toString(16).slice(2),
-    received_at: new Date().toISOString(),
-    signature: sig || null,
-    verification: { ok: verification.ok, reason: verification.reason },
-    headers: {
-      'x-webhook-event': req.header('x-webhook-event') || null,
-      'x-webhook-timestamp': ts || null,
-    },
-    body: req.body,
-  };
-  webhookEvents.unshift(record);
-  if (webhookEvents.length > MAX_WEBHOOK_EVENTS) webhookEvents.length = MAX_WEBHOOK_EVENTS;
-  const payload = `event: webhook\ndata: ${JSON.stringify(record)}\n\n`;
-  for (const client of sseClients) {
-    try {
-      client.res.write(payload);
-    } catch (_) {
-      sseClients.delete(client);
-    }
-  }
-  res.status(200).json({ ok: true });
-}
-
-// Support both direct and /api-prefixed webhook paths for hosted proxy compatibility.
-app.post('/webhooks/securedapp', handleWebhookReceive);
-app.post('/api/webhooks/securedapp', handleWebhookReceive);
 
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500;

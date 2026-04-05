@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 const LS_KEY = 'securedapp-unified-demo-connection-v1'
 
@@ -46,12 +46,68 @@ const muted = { color: '#64748b' }
 const sectionTitle = { marginTop: 0, marginBottom: 10, fontSize: 18, fontWeight: 700 }
 
 const defaultConn = {
-  cmsBaseUrl: '',
+  cmsBaseUrl: 'https://cmsbe.securedapp.io',
   apiKey: '',
   appId: '',
 }
 
 const DemoConnContext = createContext(null)
+const ToastContext = createContext(() => {})
+
+function useToast() {
+  return useContext(ToastContext)
+}
+
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([])
+  const idRef = useRef(0)
+  const showToast = useCallback((message, tone = 'success') => {
+    const id = ++idRef.current
+    setToasts((prev) => [...prev, { id, message, tone }])
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 3600)
+  }, [])
+  return (
+    <ToastContext.Provider value={showToast}>
+      {children}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          alignItems: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            style={{
+              padding: '14px 22px',
+              borderRadius: 14,
+              fontWeight: 700,
+              fontSize: 14,
+              boxShadow: '0 12px 40px rgba(15,23,42,0.25)',
+              background: t.tone === 'error' ? '#b91c1c' : '#0f172a',
+              color: '#fff',
+              maxWidth: 'min(420px, 92vw)',
+              textAlign: 'center',
+            }}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  )
+}
 
 function loadConn() {
   try {
@@ -180,6 +236,7 @@ function TabButton({ active, children, onClick }) {
 }
 
 function ConnectionPanel() {
+  const showToast = useToast()
   const { conn, saveConn, connVersion } = useContext(DemoConnContext)
   const [draft, setDraft] = useState(conn)
 
@@ -193,14 +250,14 @@ function ConnectionPanel() {
 
   return (
     <div style={{ ...card, background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)', borderColor: '#cbd5e1' }}>
-      <h2 style={{ ...sectionTitle, marginBottom: 6 }}>CMS connection</h2>
+      <h2 style={{ ...sectionTitle, marginBottom: 6 }}>Fiduciary Server Config</h2>
       <p style={{ marginTop: 0, ...muted, fontSize: 14, lineHeight: 1.5 }}>
         Enter your CMS details here once — saved in <strong>this browser only</strong> (localStorage). No redeploy needed.
         The demo API forwards <code>x-api-key</code> to your CMS; treat this like a dev tool, not a vault.
       </p>
       <p style={{ marginTop: -4, color: '#475569', fontSize: 13 }}>
-        Recommended test backend: <strong>https://cms-test-be.securedapp.io</strong>. Production backend
-        <strong> https://cmsbe.securedapp.io</strong> is also supported.
+        Default CMS URL is production <strong>https://cmsbe.securedapp.io</strong>. For sandbox use{' '}
+        <strong>https://cms-test-be.securedapp.io</strong>.
       </p>
       <div style={grid2}>
         <label style={{ gridColumn: '1 / -1' }}>
@@ -209,7 +266,7 @@ function ConnectionPanel() {
             value={draft.cmsBaseUrl}
             onChange={(e) => update('cmsBaseUrl', e.target.value)}
             style={input}
-            placeholder="https://cms-test-be.securedapp.io"
+            placeholder="https://cmsbe.securedapp.io"
             autoComplete="off"
           />
         </label>
@@ -235,7 +292,14 @@ function ConnectionPanel() {
           />
         </label>
       </div>
-      <button type="button" style={{ ...btn, marginTop: 14 }} onClick={() => saveConn(draft)}>
+      <button
+        type="button"
+        style={{ ...btn, marginTop: 14 }}
+        onClick={() => {
+          saveConn(draft)
+          showToast('Connection saved')
+        }}
+      >
         Save connection
       </button>
     </div>
@@ -243,6 +307,7 @@ function ConnectionPanel() {
 }
 
 function ConsentSection() {
+  const showToast = useToast()
   const { conn, connVersion } = useContext(DemoConnContext)
   const [purposes, setPurposes] = useState([])
   const [policy, setPolicy] = useState(null)
@@ -293,8 +358,10 @@ function ConsentSection() {
         conn
       )
       setResult(data)
+      showToast('Consent granted')
     } catch (e) {
       setError(e.message)
+      showToast(e.message || 'Grant failed', 'error')
     } finally {
       setLoading(false)
     }
@@ -318,8 +385,10 @@ function ConsentSection() {
         conn
       )
       setResult(data)
+      showToast('Consent withdrawn')
     } catch (e) {
       setError(e.message)
+      showToast(e.message || 'Withdraw failed', 'error')
     } finally {
       setLoading(false)
     }
@@ -342,8 +411,10 @@ function ConsentSection() {
         conn
       )
       setResult(data)
+      showToast('User consent state loaded')
     } catch (e) {
       setError(e.message)
+      showToast(e.message || 'Fetch failed', 'error')
     } finally {
       setLoading(false)
     }
@@ -448,114 +519,8 @@ function ConsentSection() {
   )
 }
 
-function ErpSection() {
-  const { conn, connVersion } = useContext(DemoConnContext)
-  const [events, setEvents] = useState([])
-  const [error, setError] = useState(null)
-  const [webhookUrl, setWebhookUrl] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api('/api/events', {}, conn)
-      setEvents(data.events || [])
-    } catch (e) {
-      setError(e.message)
-    }
-  }, [conn])
-
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const cfg = await api('/api/config', {}, conn)
-        setWebhookUrl(cfg.webhook_url || '')
-      } catch (_) {
-        setWebhookUrl('')
-      }
-    })()
-    refresh()
-    const t = setInterval(refresh, 5000)
-    return () => clearInterval(t)
-  }, [connVersion, refresh])
-
-  useEffect(() => {
-    const stream = new EventSource('/api/events/stream')
-    stream.addEventListener('webhook', (ev) => {
-      try {
-        const item = JSON.parse(ev.data)
-        setEvents((prev) => {
-          const next = [item, ...prev.filter((e) => e.id !== item.id)]
-          return next.slice(0, 200)
-        })
-      } catch (_) {}
-    })
-    stream.onerror = () => {
-      // Keep quiet; polling fallback continues.
-    }
-    return () => stream.close()
-  }, [])
-
-  async function onClear() {
-    setBusy(true)
-    setError(null)
-    try {
-      await api('/api/events/clear', { method: 'POST', body: JSON.stringify({}) }, conn)
-      await refresh()
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div>
-      <p style={{ ...muted, marginTop: 0 }}>
-        This tab shows webhook calls received by this demo in real time.
-      </p>
-      <div style={card}>
-        <h3 style={sectionTitle}>Webhook endpoint</h3>
-        <p style={{ color: '#475569', marginTop: 0 }}>Use this URL while creating webhook in CMS:</p>
-        <div style={{ fontFamily: 'monospace', fontSize: 13, background: '#f8fafc', border: '1px solid #e2e8f0', padding: 12, borderRadius: 10 }}>
-          {webhookUrl || 'Save connection first'}
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" onClick={refresh} disabled={busy} style={btnSec}>
-          Refresh
-        </button>
-        <button type="button" onClick={onClear} disabled={busy} style={btn}>
-          Clear
-        </button>
-        <span style={{ color: '#64748b' }}>Events: {events.length}</span>
-      </div>
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
-      <div style={{ marginTop: 16 }}>
-        {events.map((e) => (
-          <div key={e.id} style={{ ...card, marginBottom: 10, background: '#fbfdff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <strong>{e.headers?.['x-webhook-event'] || 'event'}</strong>
-                <div style={{ color: '#64748b', fontSize: 14 }}>{e.received_at}</div>
-              </div>
-              <div style={{ textAlign: 'right', fontSize: 14 }}>
-                <div>signature: {e.signature ? 'yes' : 'no'}</div>
-                <div>
-                  verify: {e.verification?.ok ? 'ok' : 'fail'} ({e.verification?.reason})
-                </div>
-              </div>
-            </div>
-            <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 10 }}>
-              {JSON.stringify(e.body, null, 2)}
-            </pre>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function RedirectSection() {
+  const showToast = useToast()
   const { conn, connVersion } = useContext(DemoConnContext)
   const [purposes, setPurposes] = useState([])
   const [selectedPurposeIds, setSelectedPurposeIds] = useState([])
@@ -613,8 +578,10 @@ function RedirectSection() {
       if (!popup) {
         setResult({ ...data, note: 'Popup blocked — open redirect_url manually.' })
       }
+      showToast('Redirect opened — complete OTP in the popup')
     } catch (e) {
       setResult({ error: e.message })
+      showToast(e.message || 'Redirect request failed', 'error')
     } finally {
       setBusy(false)
     }
@@ -677,16 +644,22 @@ function RedirectSection() {
               })}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', color: '#475569', fontSize: 14 }}>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', color: '#475569', fontSize: 14 }}>
             Active policy: <strong style={{ marginLeft: 6 }}>{policyVersionId ? 'Auto-selected' : 'Not available'}</strong>
           </div>
-          <label>
-            email
-            <input value={email} onChange={(e) => setEmail(e.target.value)} style={input} type="email" />
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Email</span>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...input, marginTop: 0 }} type="email" autoComplete="email" />
           </label>
-          <label>
-            phone_number
-            <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} style={input} />
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Phone number</span>
+            <input
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              style={{ ...input, marginTop: 0 }}
+              type="tel"
+              autoComplete="tel"
+            />
           </label>
         </div>
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -732,29 +705,23 @@ export default function App() {
   )
 
   return (
-    <DemoConnContext.Provider value={ctx}>
-      <div style={pageWrap}>
-        <h1 style={{ margin: '0 0 8px', fontSize: 30, letterSpacing: '-0.01em' }}>Unified CMS demo</h1>
-        <p style={{ margin: '0 0 20px', ...muted, lineHeight: 1.5 }}>
-          Production-friendly: configure CMS URL, API key, and app ID in the browser — no server env churn. Deploy the
-          static UI + small API once.
-        </p>
-        <ConnectionPanel />
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-          <TabButton active={tab === 'consent'} onClick={() => setTab('consent')}>
-            Consent (embedded)
-          </TabButton>
-          <TabButton active={tab === 'erp'} onClick={() => setTab('erp')}>
-            Webhooks (ERP)
-          </TabButton>
-          <TabButton active={tab === 'redirect'} onClick={() => setTab('redirect')}>
-            Redirect consent
-          </TabButton>
+    <ToastProvider>
+      <DemoConnContext.Provider value={ctx}>
+        <div style={pageWrap}>
+          <h1 style={{ margin: '0 0 20px', fontSize: 30, letterSpacing: '-0.01em' }}>Unified CMS demo</h1>
+          <ConnectionPanel />
+          <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+            <TabButton active={tab === 'consent'} onClick={() => setTab('consent')}>
+              Consent (embedded)
+            </TabButton>
+            <TabButton active={tab === 'redirect'} onClick={() => setTab('redirect')}>
+              Redirect consent
+            </TabButton>
+          </div>
+          {tab === 'consent' ? <ConsentSection /> : null}
+          {tab === 'redirect' ? <RedirectSection /> : null}
         </div>
-        {tab === 'consent' ? <ConsentSection /> : null}
-        {tab === 'erp' ? <ErpSection /> : null}
-        {tab === 'redirect' ? <RedirectSection /> : null}
-      </div>
-    </DemoConnContext.Provider>
+      </DemoConnContext.Provider>
+    </ToastProvider>
   )
 }

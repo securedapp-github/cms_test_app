@@ -2,7 +2,7 @@
 
 ### Unified demo (recommended)
 
-Single Node proxy API plus React UI — embedded consent, webhooks (ERP), and redirect consent:
+Single Node proxy API plus React UI — embedded consent and redirect consent:
 
 - **`unified-demo/backend/`** — demo API (default **:5050**)
 - **`unified-demo/frontend/`** — Vite UI (default **:5175**)

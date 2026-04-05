@@ -18,6 +18,35 @@
     button:disabled { opacity: 0.7; cursor: not-allowed; }
     .row { display: flex; gap: 0.75rem; margin-top: 0.75rem; }
     .row > * { flex: 1; }
+    .identity-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; align-items: start; }
+    @media (max-width: 640px) { .identity-row { grid-template-columns: 1fr; } }
+    #toastHost {
+      position: fixed;
+      bottom: 1.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: center;
+      pointer-events: none;
+    }
+    .app-toast {
+      background: #0f172a;
+      color: #fff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.35);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      max-width: min(420px, 92vw);
+      text-align: center;
+    }
+    .app-toast.show { opacity: 1; transform: translateY(0); }
     code { background: #e2e8f0; padding: 0.1rem 0.35rem; border-radius: 5px; }
     pre { white-space: pre-wrap; word-break: break-word; background: #f1f5f9; padding: 0.8rem; border-radius: 8px; border: 1px solid #cbd5e1; }
   </style>
@@ -30,7 +59,7 @@
     <div class="grid">
       <div>
         <label for="apiUrl">API URL</label>
-        <input id="apiUrl" value="http://localhost:3000" />
+        <input id="apiUrl" value="https://cmsbe.securedapp.io" />
       </div>
       <div>
         <label for="apiKey">x-api-key</label>
@@ -48,13 +77,15 @@
         <label for="policyVersionId">policy_version_id</label>
         <input id="policyVersionId" placeholder="Policy Version UUID" />
       </div>
-      <div>
-        <label for="email">email</label>
-        <input id="email" type="email" placeholder="user@example.com" />
-      </div>
-      <div>
-        <label for="phoneNumber">phone_number</label>
-        <input id="phoneNumber" placeholder="+919876543210" />
+      <div class="identity-row" style="grid-column: 1 / -1;">
+        <div>
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="user@example.com" autocomplete="email" />
+        </div>
+        <div>
+          <label for="phoneNumber">Phone number</label>
+          <input id="phoneNumber" type="tel" placeholder="+919876543210" autocomplete="tel" />
+        </div>
       </div>
     </div>
 
@@ -69,6 +100,8 @@
     <label>Last API response</label>
     <pre id="result">(Response will appear here)</pre>
   </div>
+
+  <div id="toastHost" aria-live="polite"></div>
 
   <script>
     (function () {
@@ -91,6 +124,20 @@
 
     function setResult(obj) {
       resultEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+    }
+
+    function showToast(text) {
+      var host = document.getElementById('toastHost');
+      if (!host) return;
+      var el = document.createElement('div');
+      el.className = 'app-toast';
+      el.textContent = text;
+      host.appendChild(el);
+      requestAnimationFrame(function () { el.classList.add('show'); });
+      setTimeout(function () {
+        el.classList.remove('show');
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 280);
+      }, 3500);
     }
 
     function getBaseUrl() {
@@ -137,6 +184,7 @@
           selected_purpose_id: purposeIdEl.value || null,
           selected_policy_version_id: policyVersionIdEl.value || null,
         });
+        showToast('Prefill loaded');
       } catch (err) {
         setResult(`Prefill failed: ${err.message}`);
       } finally {
@@ -194,6 +242,7 @@
             note: 'Popup blocked by browser. Open redirect_url manually.',
           });
         }
+        showToast('Redirect opened — complete OTP in the popup');
       } catch (err) {
         setResult(`Create redirect request failed: ${err.message}`);
       } finally {
