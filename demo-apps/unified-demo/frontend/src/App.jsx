@@ -51,6 +51,23 @@ const defaultConn = {
   appId: '',
 }
 
+/** Optional: set VITE_DEMO_API_BASE_URL when the UI is served without same-origin /api (e.g. static CDN + separate demo API host). */
+const DEMO_API_BASE = String(import.meta.env.VITE_DEMO_API_BASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '')
+
+function demoFetchPath(path) {
+  if (!path.startsWith('/')) return path
+  return DEMO_API_BASE ? `${DEMO_API_BASE}${path}` : path
+}
+
+function normalizeConsentFlow(raw) {
+  const v = String(raw || '').trim().toLowerCase()
+  if (v === 'redirect') return 'redirect'
+  if (v === 'embedded') return 'embedded'
+  return 'unknown'
+}
+
 const DemoConnContext = createContext(null)
 const ToastContext = createContext(() => {})
 
@@ -137,8 +154,9 @@ function headersFromConn(conn) {
 
 async function api(path, options, conn) {
   const base = headersFromConn(conn)
+  const url = demoFetchPath(path)
   try {
-    const res = await fetch(path, {
+    const res = await fetch(url, {
       ...options,
       headers: { ...base, ...(options?.headers || {}) },
     })
@@ -210,7 +228,13 @@ async function cmsFallback(path, options, conn) {
       ])
       return { purposes: purposes.purposes || [], policy }
     }
+    case '/api/consent/initiate':
+      return directFetch(`/public/apps/${appId}/consent/initiate`, 'POST', body, true)
     default:
+      if (path.startsWith('/api/consent/guardian/') && path.endsWith('/nominate')) {
+        const token = path.split('/')[4]
+        return directFetch(`/public/consent/guardian/${token}/nominate`, 'POST', body, false)
+      }
       return null
   }
 }
@@ -319,8 +343,8 @@ function ConsentSection() {
   const [error, setError] = useState(null)
 
   const policyVersionId = useMemo(() => policy?.policyVersion?.id || null, [policy])
-  const consentFlow = useMemo(() => policy?.policyVersion?.consent_flow || 'embedded', [policy])
-  const embeddedAllowed = consentFlow === 'embedded'
+  const consentFlow = useMemo(() => normalizeConsentFlow(policy?.policyVersion?.consent_flow), [policy])
+  const embeddedBlocked = consentFlow === 'redirect'
 
   useEffect(() => {
     setError(null)
@@ -435,9 +459,14 @@ function ConsentSection() {
       <p style={{ ...muted, marginTop: 0 }}>
         Choose one or more purposes and submit consent. The latest active policy is used automatically.
       </p>
-      {!embeddedAllowed ? (
+      {embeddedBlocked ? (
         <p style={{ color: '#b45309', marginTop: 0 }}>
-          This tenant is configured for <strong>redirect</strong> consent flow. Embedded grant/withdraw is blocked.
+          This app is configured for <strong>redirect</strong> consent flow. Embedded grant/withdraw is blocked.
+        </p>
+      ) : null}
+      {consentFlow === 'unknown' ? (
+        <p style={{ color: '#92400e', marginTop: 0 }}>
+          Could not resolve app consent flow from active policy. Configure an <strong>active policy version</strong> for this app.
         </p>
       ) : null}
       <div style={card}>
@@ -496,7 +525,7 @@ function ConsentSection() {
           </button>
           <button
             type="button"
-            disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId || !embeddedAllowed}
+            disabled={loading || selectedPurposeIds.length === 0 || !policyVersionId || embeddedBlocked}
             onClick={onGrant}
             style={btn}
           >
@@ -504,7 +533,7 @@ function ConsentSection() {
           </button>
           <button
             type="button"
-            disabled={loading || selectedPurposeIds.length === 0 || !embeddedAllowed}
+            disabled={loading || selectedPurposeIds.length === 0 || embeddedBlocked}
             onClick={onWithdraw}
             style={btnSec}
           >
@@ -527,9 +556,16 @@ function RedirectSection() {
   const [policyVersionId, setPolicyVersionId] = useState('')
   const [email, setEmail] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [dob, setDob] = useState('1990-01-01')
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [consentFlow, setConsentFlow] = useState('embedded')
+  const [consentFlow, setConsentFlow] = useState('unknown')
+  
+  const [flowState, setFlowState] = useState('idle') // idle, guardian_form, completed
+  const [sessionToken, setSessionToken] = useState('')
+  const [guardianName, setGuardianName] = useState('')
+  const [guardianEmail, setGuardianEmail] = useState('')
+  const [guardianPhone, setGuardianPhone] = useState('')
 
   useEffect(() => {
     setResult(null)
@@ -542,7 +578,7 @@ function RedirectSection() {
         const fetchedPurposes = data.purposes || []
         setPurposes(fetchedPurposes)
         if (data.policy?.policyVersion?.id) setPolicyVersionId(data.policy.policyVersion.id)
-        setConsentFlow(data.policy?.policyVersion?.consent_flow || 'embedded')
+        setConsentFlow(normalizeConsentFlow(data.policy?.policyVersion?.consent_flow))
       } catch (e) {
         setResult({ error: e.message })
       } finally {
@@ -551,40 +587,100 @@ function RedirectSection() {
     })()
   }, [connVersion, conn])
 
-  async function onCreate() {
+  async function onInitiate() {
+    setBusy(true)
+    setResult(null)
+    try {
+      const phone = phoneNumber.trim()
+      const initiateBody = {
+        email: email.trim(),
+        phone_number: phone,
+        mobile: phone,
+        dob: dob || undefined,
+        purpose_ids: selectedPurposeIds,
+        callback_url: window.location.origin,
+      }
+      if (policyVersionId) initiateBody.policy_version_id = policyVersionId
+
+      const data = await api(
+        '/api/consent/initiate',
+        {
+          method: 'POST',
+          body: JSON.stringify(initiateBody),
+        },
+        conn
+      )
+      
+      if (data.flow === 'guardian_required') {
+        let extractedToken = data.token;
+        if (!extractedToken && (data.redirect_url || data.pop_url)) {
+          const urlStr = data.redirect_url || data.pop_url;
+          const urlObj = new URL(urlStr, window.location.origin);
+          const pathParts = urlObj.pathname.split('/');
+          extractedToken = pathParts[pathParts.length - 1];
+        }
+        setSessionToken(extractedToken)
+        setFlowState('guardian_form')
+        showToast('Guardian required for minor.')
+      } else {
+        setResult(data)
+        const redirectUrl = data.redirect_url || data.pop_url
+        if (!redirectUrl) throw new Error('redirect_url missing')
+        const popup = window.open(
+          redirectUrl,
+          'redirect-consent-popup',
+          'popup=yes,width=520,height=760,resizable=yes,scrollbars=yes'
+        )
+        if (!popup) {
+          setResult({ ...data, note: 'Popup blocked — open redirect URL manually.' })
+        }
+        showToast('Redirect opened — complete OTP in the popup')
+      }
+    } catch (e) {
+      setResult({ error: e.message })
+      showToast(e.message || 'Initiate request failed', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onGuardianSubmit(e) {
+    e.preventDefault()
     setBusy(true)
     setResult(null)
     try {
       const data = await api(
-        '/api/redirect/request',
+        `/api/consent/guardian/${sessionToken}/nominate`,
         {
           method: 'POST',
           body: JSON.stringify({
-            email: email.trim(),
-            phone_number: phoneNumber.trim(),
-            purpose_ids: selectedPurposeIds,
-            policy_version_id: policyVersionId.trim(),
+            guardian_name: guardianName.trim(),
+            guardian_email: guardianEmail.trim(),
+            guardian_phone: guardianPhone.trim(),
+            relationship: 'Parent',
+            relation: 'Parent',
           }),
         },
         conn
       )
       setResult(data)
-      if (!data.redirect_url) throw new Error('redirect_url missing')
-      const popup = window.open(
-        data.redirect_url,
-        'redirect-consent-popup',
-        'popup=yes,width=520,height=760,resizable=yes,scrollbars=yes'
-      )
-      if (!popup) {
-        setResult({ ...data, note: 'Popup blocked — open redirect_url manually.' })
-      }
-      showToast('Redirect opened — complete OTP in the popup')
+      setFlowState('completed')
+      showToast('Consent link sent to guardian email.')
     } catch (e) {
       setResult({ error: e.message })
-      showToast(e.message || 'Redirect request failed', 'error')
+      showToast(e.message || 'Guardian nomination failed', 'error')
     } finally {
       setBusy(false)
     }
+  }
+
+  function onReset() {
+    setFlowState('idle')
+    setSessionToken('')
+    setGuardianName('')
+    setGuardianEmail('')
+    setGuardianPhone('')
+    setResult(null)
   }
 
   function togglePurpose(purposeId) {
@@ -597,14 +693,73 @@ function RedirectSection() {
     setSelectedPurposeIds((prev) => (prev.length === purposes.length ? [] : purposes.map((p) => p.id)))
   }
 
+  if (flowState === 'guardian_form') {
+    return (
+      <div style={card}>
+        <h3 style={sectionTitle}>Guardian Details Required</h3>
+        <p style={{ marginTop: 0, color: '#475569', fontSize: 14 }}>
+          Since the user is a minor, we need a guardian to approve the consent request.
+          Please provide the guardian's details below.
+        </p>
+        <form onSubmit={onGuardianSubmit} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Guardian Name</span>
+            <input required value={guardianName} onChange={(e) => setGuardianName(e.target.value)} style={{ ...input, marginTop: 0 }} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Guardian Email</span>
+            <input required value={guardianEmail} onChange={(e) => setGuardianEmail(e.target.value)} style={{ ...input, marginTop: 0 }} type="email" />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Guardian Phone</span>
+            <input
+              required
+              value={guardianPhone}
+              onChange={(e) => setGuardianPhone(e.target.value)}
+              style={{ ...input, marginTop: 0 }}
+              type="tel"
+              placeholder="+91…"
+            />
+          </label>
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button type="submit" style={{ ...btn, opacity: busy ? 0.7 : 1, cursor: busy ? 'not-allowed' : 'pointer' }} disabled={busy}>
+              {busy ? 'Submitting...' : 'Submit Guardian Details'}
+            </button>
+            <button type="button" style={btnSec} onClick={onReset} disabled={busy}>Cancel</button>
+          </div>
+        </form>
+        {result?.error ? <p style={{ color: '#b91c1c', marginTop: 12 }}>{result.error}</p> : null}
+      </div>
+    )
+  }
+
+  if (flowState === 'completed') {
+    return (
+      <div style={card}>
+        <h3 style={sectionTitle}>Consent Request Sent</h3>
+        <p style={{ marginTop: 0, color: '#166534', fontSize: 15 }}>
+          Consent link sent to guardian email. They will complete the process.
+        </p>
+        <button type="button" style={{ ...btn, marginTop: 16 }} onClick={onReset}>
+          Start Over
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div>
       <p style={{ ...muted, marginTop: 0 }}>
         We use the latest active policy automatically. Select purpose(s), enter user details, and open the OTP consent popup.
       </p>
-      {consentFlow !== 'redirect' ? (
+      {consentFlow === 'embedded' ? (
         <p style={{ color: '#b45309', marginTop: 0 }}>
-          This tenant is configured for <strong>embedded</strong> consent flow. Redirect request is blocked.
+          This app is configured for <strong>embedded</strong> consent flow. Redirect request is blocked.
+        </p>
+      ) : null}
+      {consentFlow === 'unknown' ? (
+        <p style={{ color: '#92400e', marginTop: 0 }}>
+          Could not resolve app consent flow from active policy. Configure an <strong>active policy version</strong> for this app.
         </p>
       ) : null}
       <div style={card}>
@@ -661,22 +816,31 @@ function RedirectSection() {
               autoComplete="tel"
             />
           </label>
+          <label style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 4 }}>Date of Birth</span>
+            <input
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              style={{ ...input, marginTop: 0 }}
+              type="date"
+            />
+          </label>
         </div>
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button
             type="button"
-            style={btn}
-            disabled={busy || selectedPurposeIds.length === 0 || !policyVersionId.trim() || consentFlow !== 'redirect'}
-            onClick={onCreate}
+            style={{ ...btn, opacity: busy ? 0.7 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}
+            disabled={busy || selectedPurposeIds.length === 0 || consentFlow === 'embedded'}
+            onClick={onInitiate}
           >
-            Create redirect + open popup
+            {busy ? 'Initiating...' : 'Initiate Consent Flow'}
           </button>
         </div>
       </div>
       <div style={card}>
         <strong style={{ fontSize: 15 }}>Status</strong>
         <p style={{ marginTop: 8, color: result?.error ? '#b91c1c' : '#166534' }}>
-          {result ? (result.error || 'Redirect request created successfully.') : '—'}
+          {result ? (result.error || 'Request completed successfully.') : '—'}
         </p>
       </div>
     </div>

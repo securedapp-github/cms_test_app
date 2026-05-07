@@ -13,5 +13,9 @@ export default defineConfig({
   },
   preview: {
     allowedHosts: ['cms-test.securedapp.io', 'localhost'],
+    // Same as dev: so `npm run build && npm run preview` can reach the demo API on :5050
+    proxy: {
+      '/api': 'http://localhost:5050',
+    },
   },
 })
