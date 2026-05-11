@@ -56,6 +56,12 @@ const DEMO_API_BASE = String(import.meta.env.VITE_DEMO_API_BASE_URL || '')
   .trim()
   .replace(/\/+$/, '')
 
+function shouldUseDemoProxy() {
+  if (DEMO_API_BASE) return true
+  if (typeof window === 'undefined') return false
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
 function demoFetchPath(path) {
   if (!path.startsWith('/')) return path
   return DEMO_API_BASE ? `${DEMO_API_BASE}${path}` : path
@@ -153,28 +159,34 @@ function headersFromConn(conn) {
 }
 
 async function api(path, options, conn) {
-  const base = headersFromConn(conn)
-  const url = demoFetchPath(path)
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers: { ...base, ...(options?.headers || {}) },
-    })
-    const data = await res.json().catch(() => null)
-    if (res.ok) return data
+  if (shouldUseDemoProxy()) {
+    const base = headersFromConn(conn)
+    const url = demoFetchPath(path)
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: { ...base, ...(options?.headers || {}) },
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) return data
 
-    // If demo proxy is unavailable in deployment, fallback to direct CMS public APIs.
-    if ([502, 503, 504].includes(res.status)) {
+      // If demo proxy is unavailable in deployment, fallback to direct CMS public APIs.
+      if ([404, 502, 503, 504].includes(res.status)) {
+        const fallback = await cmsFallback(path, options, conn)
+        if (fallback !== null) return fallback
+      }
+      throw new Error((data && data.error) || `Request failed: ${res.status}`)
+    } catch (err) {
+      // Network-level failure on demo proxy: try direct CMS fallback.
       const fallback = await cmsFallback(path, options, conn)
       if (fallback !== null) return fallback
+      throw err
     }
-    throw new Error((data && data.error) || `Request failed: ${res.status}`)
-  } catch (err) {
-    // Network-level failure on demo proxy: try direct CMS fallback.
-    const fallback = await cmsFallback(path, options, conn)
-    if (fallback !== null) return fallback
-    throw err
   }
+
+  const direct = await cmsFallback(path, options, conn)
+  if (direct !== null) return direct
+  throw new Error('Demo API base is not configured for this deployment')
 }
 
 async function cmsFallback(path, options, conn) {
