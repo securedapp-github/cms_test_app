@@ -47,11 +47,67 @@ function requireClientConfig(ctx, options = {}) {
   }
 }
 
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+let mtlsAgent = null;
+
+function getMtlsAgent() {
+  if (process.env.CMS_MTLS_ENABLED !== 'true') {
+    console.log('mTLS disabled');
+    return undefined;
+  }
+
+  if (mtlsAgent) return mtlsAgent;
+
+  try {
+    const keyPath = path.resolve(
+      __dirname,
+      process.env.CMS_CLIENT_KEY_PATH || './certs/client.key'
+    );
+
+    const certPath = path.resolve(
+      __dirname,
+      process.env.CMS_CLIENT_CERT_PATH || './certs/client.crt'
+    );
+
+    console.log('mTLS key:', keyPath);
+    console.log('mTLS cert:', certPath);
+
+    const key = fs.readFileSync(keyPath);
+    const cert = fs.readFileSync(certPath);
+
+    const agentOptions = {
+      key,
+      cert,
+      rejectUnauthorized: true,
+      keepAlive: true,
+      servername: 'cmsbe.securedapp.io',
+    };
+
+    mtlsAgent = new https.Agent(agentOptions);
+
+    console.log('mTLS Agent loaded successfully.');
+    console.log('Client certificate size:', cert.length);
+    console.log('Client key size:', key.length);
+
+    return mtlsAgent;
+  } catch (err) {
+    console.error('Failed to initialize mTLS agent:', err);
+    return undefined;
+  }
+}
+
 async function cmsFetch(ctx, path, options = {}) {
   requireClientConfig(ctx, { needsAppId: Boolean(options.needsAppId) });
   const url = `${ctx.base}${path}`;
+
+  const agent = url.startsWith('https') ? getMtlsAgent() : undefined;
+
   const res = await fetch(url, {
     ...options,
+    agent,
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',

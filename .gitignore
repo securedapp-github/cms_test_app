@@ -13,6 +13,7 @@ node_modules/
 # Demo apps: source is tracked; install artifacts are not
 demo-apps/**/node_modules/
 demo-apps/**/dist/
+demo-apps/**/certs/
 
 # Logs and debug
 logs/
